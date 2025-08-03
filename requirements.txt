@@ -1,0 +1,5 @@
+opencv-python
+numpy
+PyQt5
+pytest
+scikit-image 
