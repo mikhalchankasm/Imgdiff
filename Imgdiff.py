@@ -109,8 +109,22 @@ class FilteredTable(QWidget):
         super().__init__(parent)
         self.settings_key = settings_key
         self._layout = QVBoxLayout(self)
+        
+        # 📍 Заголовок с меткой выбранной папки
+        header_layout = QHBoxLayout()
         self.dir_btn = QPushButton(label)
-        # --- Новый фильтр: QComboBox с историей ---
+        self.dir_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        
+        # 🏷️ Метка для отображения выбранного пути
+        self.path_label = QLabel("Папка не выбрана")
+        self.path_label.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
+        self.path_label.setWordWrap(True)
+        self.path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        header_layout.addWidget(self.dir_btn)
+        header_layout.addWidget(self.path_label)
+        
+        # --- 🔍 Новый фильтр: QComboBox с историей ---
         filter_row = QHBoxLayout()
         self.filter_combo = QComboBox()
         self.filter_combo.setEditable(True)
@@ -125,36 +139,106 @@ class FilteredTable(QWidget):
         self.filter_combo.setCurrentText("")
         self.filter_combo.lineEdit().setPlaceholderText("Фильтр по имени...")
         self.filter_combo.lineEdit().editingFinished.connect(self.add_filter_to_history)
-        # Кнопка сброса фильтра
-        self.clear_filter_btn = QPushButton('X')
+        
+        # 🎯 Кнопки с иконками и подсказками
+        # ✕ Кнопка сброса фильтра
+        self.clear_filter_btn = QPushButton('✕')
         self.clear_filter_btn.setToolTip("Сбросить фильтр")
-        self.clear_filter_btn.setFixedWidth(24)
+        self.clear_filter_btn.setFixedWidth(32)
+        self.clear_filter_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6b6b;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff5252;
+            }
+        """)
         self.clear_filter_btn.clicked.connect(self.clear_filter)
-        # Кнопка очистки истории
-        self.clear_history_btn = QPushButton('C')
+        
+        # 🗑 Кнопка очистки истории
+        self.clear_history_btn = QPushButton('🗑')
         self.clear_history_btn.setToolTip("Очистить историю фильтров")
-        self.clear_history_btn.setFixedWidth(24)
+        self.clear_history_btn.setFixedWidth(32)
+        self.clear_history_btn.setStyleSheet("""
+            QPushButton {
+                background: #ffa726;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #ff9800;
+            }
+        """)
         self.clear_history_btn.clicked.connect(self.clear_filter_history)
-        # Кнопка обновления директории
-        self.refresh_btn = QPushButton('R')
+        
+        # 🔄 Кнопка обновления директории
+        self.refresh_btn = QPushButton('🔄')
         self.refresh_btn.setToolTip("Обновить содержимое папки")
-        self.refresh_btn.setFixedWidth(24)
+        self.refresh_btn.setFixedWidth(32)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #42a5f5;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #2196f3;
+            }
+        """)
         self.refresh_btn.clicked.connect(self.refresh_dir)
-        # Кнопки сортировки
+        
+        # ↑↓ Кнопки сортировки
         self.sort_asc_btn = QPushButton('↑')
         self.sort_asc_btn.setToolTip("Сортировка по возрастанию")
-        self.sort_asc_btn.setFixedWidth(24)
+        self.sort_asc_btn.setFixedWidth(32)
+        self.sort_asc_btn.setStyleSheet("""
+            QPushButton {
+                background: #66bb6a;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background: #4caf50;
+            }
+        """)
         self.sort_asc_btn.clicked.connect(self.sort_ascending)
+        
         self.sort_desc_btn = QPushButton('↓')
         self.sort_desc_btn.setToolTip("Сортировка по убыванию")
-        self.sort_desc_btn.setFixedWidth(24)
+        self.sort_desc_btn.setFixedWidth(32)
+        self.sort_desc_btn.setStyleSheet("""
+            QPushButton {
+                background: #66bb6a;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background: #4caf50;
+            }
+        """)
         self.sort_desc_btn.clicked.connect(self.sort_descending)
+        
         filter_row.addWidget(self.filter_combo)
         filter_row.addWidget(self.clear_filter_btn)
         filter_row.addWidget(self.clear_history_btn)
         filter_row.addWidget(self.refresh_btn)
         filter_row.addWidget(self.sort_asc_btn)
         filter_row.addWidget(self.sort_desc_btn)
+        
         self.table = DndTableWidget(0, 1)
         self.table.directory_dropped.connect(self.load_from_dir)
         self.table.setHorizontalHeaderLabels(["Имя"])
@@ -164,13 +248,16 @@ class FilteredTable(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
+        
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setFixedHeight(200)
-        self._layout.addWidget(self.dir_btn)
+        
+        self._layout.addLayout(header_layout)
         self._layout.addLayout(filter_row)
         self._layout.addWidget(self.table, 1)
         self._layout.addWidget(self.preview)
+        
         self.files = []  # [(name, path)]
         self.filtered = []  # индексы видимых файлов
         self.dir_path = ""
@@ -178,6 +265,56 @@ class FilteredTable(QWidget):
         self.filter_combo.lineEdit().textChanged.connect(self.apply_filter)
         self.table.currentCellChanged.connect(self.show_preview)
         self.load_filter_history()
+
+    def update_path_label(self):
+        """🏷️ Обновляет метку с путем выбранной папки"""
+        if self.dir_path:
+            # 📂 Показываем только имя папки и родительскую директорию для краткости
+            path_obj = Path(self.dir_path)
+            if path_obj.parent.name:
+                display_path = f"{path_obj.parent.name} / {path_obj.name}"
+            else:
+                display_path = path_obj.name
+            self.path_label.setText(display_path)
+            self.path_label.setStyleSheet("color: #2e7d32; font-weight: bold; padding: 4px; background: #e8f5e8; border-radius: 4px;")
+        else:
+            self.path_label.setText("Папка не выбрана")
+            self.path_label.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
+
+    def load_files(self, files, dir_path=None):
+        # 🔄 Сортируем файлы с естественной сортировкой при загрузке
+        sorted_files = sorted(files, key=lambda f: natural_sort_key(os.path.basename(f)))
+        self.files = [(os.path.basename(f), f) for f in sorted_files]
+        if dir_path:
+            self.dir_path = dir_path
+        self.update_path_label()  # 🏷️ Обновляем метку пути
+        self.apply_filter()
+
+    def load_from_dir(self, dir_path):
+        exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+        files = [
+            str(Path(dir_path) / f)
+            for f in os.listdir(dir_path)
+            if Path(f).suffix.lower() in exts
+        ]
+        self.load_files(files, dir_path)
+
+    def restore_state(self, settings: QSettings):
+        dir_path = settings.value(f"{self.settings_key}/dir", "")
+        filter_text = settings.value(f"{self.settings_key}/filter", "")
+        sort_order = settings.value(f"{self.settings_key}/sort_order", "asc")
+        self.sort_order = sort_order
+        self.load_filter_history()
+        if dir_path and os.path.isdir(dir_path):
+            exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+            files = [
+                str(Path(dir_path) / f)
+                for f in os.listdir(dir_path)
+                if Path(f).suffix.lower() in exts
+            ]
+            self.load_files(files, dir_path)
+        self.filter_combo.setCurrentText(filter_text)
+        self.apply_filter()
 
     def load_filter_history(self):
         settings = QSettings("imgdiff", "imgdiff_gui")
@@ -219,32 +356,24 @@ class FilteredTable(QWidget):
             ]
             self.load_files(files, self.dir_path)
 
-    def load_files(self, files, dir_path=None):
-        # Сортируем файлы с естественной сортировкой при загрузке
-        sorted_files = sorted(files, key=lambda f: natural_sort_key(os.path.basename(f)))
-        self.files = [(os.path.basename(f), f) for f in sorted_files]
-        if dir_path:
-            self.dir_path = dir_path
-        self.apply_filter()
-
     def apply_filter(self):
         text = self.filter_combo.currentText().lower()
         self.table.setRowCount(0)
         self.filtered = []
         
-        # Фильтруем файлы
+        # 🔍 Фильтруем файлы
         filtered_files = []
         for idx, (name, path) in enumerate(self.files):
             if text in name.lower():
                 filtered_files.append((idx, name, path))
         
-        # Сортируем отфильтрованные файлы с естественной сортировкой
+        # 🔄 Сортируем отфильтрованные файлы с естественной сортировкой
         if self.sort_order == "asc":
-            filtered_files.sort(key=lambda x: natural_sort_key(x[1]))  # по имени по возрастанию
+            filtered_files.sort(key=lambda x: natural_sort_key(x[1]))  # 📈 по имени по возрастанию
         elif self.sort_order == "desc":
-            filtered_files.sort(key=lambda x: natural_sort_key(x[1]), reverse=True)  # по имени по убыванию
+            filtered_files.sort(key=lambda x: natural_sort_key(x[1]), reverse=True)  # 📉 по имени по убыванию
         
-        # Добавляем в таблицу
+        # ➕ Добавляем в таблицу
         for idx, name, path in filtered_files:
             row = self.table.rowCount()
             self.table.insertRow(row)
@@ -583,20 +712,49 @@ class MainWindow(QMainWindow):
         self.alignment_control_panel = None  # Будет создан при инициализации UI
         
         print('step 2')
-        # --- Радиокнопки сравнения в QGroupBox ---
+        # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
         self.radio_sel = QRadioButton("Сравнить только выделенные")
         self.radio_sel.setChecked(True)
         self.radio_group = QButtonGroup()
         self.radio_group.addButton(self.radio_all)
         self.radio_group.addButton(self.radio_sel)
-        radio_box = QGroupBox("Режим сравнения")
+        radio_box = QGroupBox("⚙️ Режим сравнения")
         radio_layout = QVBoxLayout()
         radio_layout.addWidget(self.radio_all)
         radio_layout.addWidget(self.radio_sel)
         radio_box.setLayout(radio_layout)
+        radio_box.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                color: #424242;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
         print('step 3')
-        self.compare_btn = QPushButton("Сравнить")
+        self.compare_btn = QPushButton("⚡ Сравнить")
+        self.compare_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff9800;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #f57c00;
+            }
+        """)
         self.compare_btn.clicked.connect(self.compare)
         self.result_table = QTableWidget(0, 3)
         self.result_table.setHorizontalHeaderLabels(["Имя", "Статус", ""])
@@ -606,13 +764,49 @@ class MainWindow(QMainWindow):
         self.result_table.setColumnHidden(2, True)
         self.result_table.itemDoubleClicked.connect(self.open_result)
         print('step 4')
-        self.out_dir_label = QLabel("Папка вывода:")
+        self.out_dir_label = QLabel("📤 Папка вывода:")
         self.out_dir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.out_dir_btn = QPushButton("Выбрать папку вывода…")
+        self.out_dir_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #d84315;
+                padding: 8px;
+                background: #fbe9e7;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
+        self.out_dir_btn = QPushButton("📁 Выбрать папку вывода…")
+        self.out_dir_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff7043;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff5722;
+            }
+        """)
         self.out_dir_btn.clicked.connect(self.choose_out_dir)
-        self.out_dir_refresh_btn = QPushButton('R')
+        self.out_dir_refresh_btn = QPushButton('🔄')
         self.out_dir_refresh_btn.setToolTip("Обновить список результатов")
-        self.out_dir_refresh_btn.setFixedWidth(24)
+        self.out_dir_refresh_btn.setFixedWidth(32)
+        self.out_dir_refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #42a5f5;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #2196f3;
+            }
+        """)
         self.out_dir_refresh_btn.clicked.connect(self.load_results_from_output_dir)
         out_dir_row = QHBoxLayout()
         out_dir_row.addWidget(self.out_dir_btn)
@@ -623,13 +817,25 @@ class MainWindow(QMainWindow):
         result_col.addLayout(out_dir_row)
         result_col.addWidget(radio_box)
         result_col.addWidget(self.compare_btn)
-        result_col.addWidget(QLabel("Результаты:"))
+        results_label = QLabel("📊 Результаты:")
+        results_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #6a1b9a;
+                padding: 8px;
+                background: #f3e5f5;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
+        result_col.addWidget(results_label)
         result_col_w = QWidget()
         result_col_w.setLayout(result_col)
         result_col_w.setMinimumWidth(120)
         result_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         print('step 6')
-        # --- Вкладка 1: Настройки сравнения ---
+        # --- Вкладка 1: ⚙️ Настройки сравнения ---
         self.fuzz_spin = QSpinBox()
         self.fuzz_spin.setRange(0, 100)
         self.fuzz_spin.setSuffix(" %")
@@ -703,12 +909,27 @@ class MainWindow(QMainWindow):
         param_form.addRow("Use SSIM", self.ssim_chk)
         param_form.addRow("Допуск совпадений (px)", self.match_tolerance_spin)
         param_form.addRow("Цвет совпадений", self.match_color_btn)
-        param_group = QGroupBox("Параметры Outline")
+        param_group = QGroupBox("🔧 Параметры Outline")
+        param_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                color: #424242;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
         param_group.setLayout(param_form)
         param_group.setMaximumWidth(350)
-        # --- Пояснения отдельным блоком ---
+        # --- 📚 Пояснения отдельным блоком ---
         param_help = QLabel(
-            "<b>Пояснения к параметрам:</b><br>"
+            "<b>📚 Пояснения к параметрам:</b><br>"
             "<b>Допуск (fuzz):</b> Процент пикселей, которые могут отличаться и считаться равными. Чем выше — тем менее чувствительно.<br>"
             "<b>Толщина (px):</b> Толщина линии выделения отличий.<br>"
             "<b>Цвет:</b> Цвет для выделения отличий.<br>"
@@ -730,12 +951,23 @@ class MainWindow(QMainWindow):
         settings_tab = QWidget()
         settings_tab.setLayout(settings_layout)
 
-        # --- Вкладка 2: Сравнение/Слайдер ---
-        # Левый столбец: грид A
+        # --- Вкладка 2: 🔄 Сравнение/Слайдер ---
+        # 📁 Левый столбец: грид A
         print('left_col_w start')
-        self.grp_a = FilteredTable("Выбрать папку A…", "A")
-        self.grp_a_label = QLabel("Папка A")
+        self.grp_a = FilteredTable("📁 Папка A", "A")
+        self.grp_a_label = QLabel("📁 Папка A")
         self.grp_a_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.grp_a_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #1976d2;
+                padding: 8px;
+                background: #e3f2fd;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
         left_col = QVBoxLayout()
         left_col.addWidget(self.grp_a_label)
         left_col.addWidget(self.grp_a)
@@ -745,11 +977,22 @@ class MainWindow(QMainWindow):
         left_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         print('left_col_w end')
         print('step 7')
-        # Средний столбец: грид B
+        # 📁 Средний столбец: грид B
         print('mid_col_w start')
-        self.grp_b = FilteredTable("Выбрать папку B…", "B")
-        self.grp_b_label = QLabel("Папка B")
+        self.grp_b = FilteredTable("📁 Папка B", "B")
+        self.grp_b_label = QLabel("📁 Папка B")
         self.grp_b_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.grp_b_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #388e3c;
+                padding: 8px;
+                background: #e8f5e8;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
         mid_col = QVBoxLayout()
         mid_col.addWidget(self.grp_b_label)
         mid_col.addWidget(self.grp_b)
@@ -759,35 +1002,103 @@ class MainWindow(QMainWindow):
         mid_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         print('mid_col_w end')
         print('step 8')
-        # Правая колонка: результаты
-        self.out_dir_label = QLabel("Папка вывода:")
+        # 📊 Правая колонка: результаты
+        self.out_dir_label = QLabel("📤 Папка вывода:")
         self.out_dir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.out_dir_btn = QPushButton("Выбрать папку вывода…")
+        self.out_dir_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #d84315;
+                padding: 8px;
+                background: #fbe9e7;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
+        self.out_dir_btn = QPushButton("📁 Выбрать папку вывода…")
+        self.out_dir_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff7043;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff5722;
+            }
+        """)
         self.out_dir_btn.clicked.connect(self.choose_out_dir)
-        # Кнопка обновления папки результатов
-        self.out_dir_refresh_btn = QPushButton('R')
+        # 🔄 Кнопка обновления папки результатов
+        self.out_dir_refresh_btn = QPushButton('🔄')
         self.out_dir_refresh_btn.setToolTip("Обновить список результатов")
-        self.out_dir_refresh_btn.setFixedWidth(24)
+        self.out_dir_refresh_btn.setFixedWidth(32)
+        self.out_dir_refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #42a5f5;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #2196f3;
+            }
+        """)
         self.out_dir_refresh_btn.clicked.connect(self.load_results_from_output_dir)
         out_dir_row = QHBoxLayout()
         out_dir_row.addWidget(self.out_dir_btn)
         out_dir_row.addWidget(self.out_dir_refresh_btn)
-        # --- Радиокнопки сравнения в QGroupBox ---
+        # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
         self.radio_sel = QRadioButton("Сравнить только выделенные")
         self.radio_sel.setChecked(True)
         self.radio_group = QButtonGroup()
         self.radio_group.addButton(self.radio_all)
         self.radio_group.addButton(self.radio_sel)
-        radio_box = QGroupBox("Режим сравнения")
+        radio_box = QGroupBox("⚙️ Режим сравнения")
         radio_layout = QVBoxLayout()
         radio_layout.addWidget(self.radio_all)
         radio_layout.addWidget(self.radio_sel)
         radio_box.setLayout(radio_layout)
+        radio_box.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                color: #424242;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
         
-        # Кнопка сохранения overlay - перемещена под радио-кнопки
-        self.save_overlay_btn = QPushButton("Сохранить")
+        # 💾 Кнопка сохранения overlay - перемещена под радио-кнопки
+        self.save_overlay_btn = QPushButton("💾 Сохранить overlay")
         self.save_overlay_btn.setToolTip("Сохранить overlay для выбранных или всех файлов (в зависимости от выделения)")
+        self.save_overlay_btn.setStyleSheet("""
+            QPushButton {
+                background: #2196f3;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1976d2;
+            }
+            QPushButton:disabled {
+                background: #bdbdbd;
+                color: #757575;
+            }
+        """)
         self.save_overlay_btn.clicked.connect(self.save_overlay)
         self.save_overlay_btn.setEnabled(False)  # Включаем только когда overlay активен
         
@@ -798,14 +1109,52 @@ class MainWindow(QMainWindow):
         result_col.addLayout(out_dir_row)
         result_col.addWidget(radio_box)
         result_col.addWidget(self.save_overlay_btn)  # Кнопка под радио-кнопками
-        result_col.addWidget(QLabel("Результаты:"))
+        results_label = QLabel("📊 Результаты:")
+        results_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #6a1b9a;
+                padding: 8px;
+                background: #f3e5f5;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
+        result_col.addWidget(results_label)
         result_col.addWidget(self.result_table, 1)
-        self.open_external_btn = QPushButton("Открыть в системном просмотрщике")
+        self.open_external_btn = QPushButton("🖼️ Открыть в системном просмотрщике")
         self.open_external_btn.setToolTip("Открыть выбранный результат в стандартном приложении Windows")
+        self.open_external_btn.setStyleSheet("""
+            QPushButton {
+                background: #607d8b;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #455a64;
+            }
+        """)
         self.open_external_btn.clicked.connect(self.open_result_external)
         result_col.addWidget(self.open_external_btn)
-        self.open_internal_viewer_btn = QPushButton("Открыть в отдельном окне")
+        self.open_internal_viewer_btn = QPushButton("🔍 Открыть в отдельном окне")
         self.open_internal_viewer_btn.setToolTip("Показать выбранный результат в отдельном окне с zoom/drag")
+        self.open_internal_viewer_btn.setStyleSheet("""
+            QPushButton {
+                background: #795548;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #5d4037;
+            }
+        """)
         self.open_internal_viewer_btn.clicked.connect(self.open_result_internal_viewer)
         result_col.addWidget(self.open_internal_viewer_btn)
         result_col_w = QWidget()
@@ -827,12 +1176,12 @@ class MainWindow(QMainWindow):
         print('after setSizes')
         self.splitter.setHandleWidth(4)
         print('after setHandleWidth')
-        # --- Слайдер справа ---
+        # --- 🖼️ Слайдер справа ---
         print('before slider_widget')
         self.slider_widget = QWidget()
         self.slider_layout = QVBoxLayout(self.slider_widget)
         print('after slider_widget')
-        # --- Панель управления над слайсером ---
+        # --- 🎛️ Панель управления над слайсером ---
         self.slider_control = QHBoxLayout()
         self.overlay_chk = QCheckBox("Overlay")
         self.overlay_chk.setChecked(False)
@@ -840,15 +1189,54 @@ class MainWindow(QMainWindow):
         self.overlay_chk.stateChanged.connect(self.update_slider_overlay_mode)
         
         # Кнопка "Вписать всё"
-        self.fit_to_window_btn = QPushButton("Вписать всё")
+        self.fit_to_window_btn = QPushButton("🔍 Вписать всё")
         self.fit_to_window_btn.setToolTip("Вписать изображение в окно целиком")
+        self.fit_to_window_btn.setStyleSheet("""
+            QPushButton {
+                background: #4caf50;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #388e3c;
+            }
+        """)
         self.fit_to_window_btn.clicked.connect(self.fit_to_window)
         
-        self.prev_btn = QPushButton("<")
+        self.prev_btn = QPushButton("◀")
         self.prev_btn.setFixedWidth(32)
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                background: #9c27b0;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background: #7b1fa2;
+            }
+        """)
         self.prev_btn.clicked.connect(lambda: self.navigate_result(-1))
-        self.next_btn = QPushButton(">")
+        self.next_btn = QPushButton("▶")
         self.next_btn.setFixedWidth(32)
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background: #9c27b0;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background: #7b1fa2;
+            }
+        """)
         self.next_btn.clicked.connect(lambda: self.navigate_result(1))
         self.slider_control.addWidget(self.overlay_chk)
         self.slider_control.addWidget(self.fit_to_window_btn)
@@ -885,7 +1273,7 @@ class MainWindow(QMainWindow):
         # Удаляем вызов self.update_slider_view_mode()
         # self.update_slider_view_mode()  # Удалить эту строку
         print('after slider setup')
-        # --- Главный QSplitter: три колонки + слайдер ---
+        # --- 🎯 Главный QSplitter: три колонки + слайдер ---
         print('before main_splitter')
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         print('after main_splitter')
@@ -897,7 +1285,7 @@ class MainWindow(QMainWindow):
         print('after main_splitter setSizes')
         self.main_splitter.setHandleWidth(4)
         print('after main_splitter setHandleWidth')
-        # --- Tabs ---
+        # --- 📑 Tabs ---
         print('before tabs')
         self.tabs = QTabWidget()
         print('after tabs')
@@ -911,7 +1299,7 @@ class MainWindow(QMainWindow):
         print('after add main_tab')
         self.setCentralWidget(self.tabs)
         print('after setCentralWidget')
-        # --- Современный стиль ---
+        # --- 🎨 Современный стиль ---
         self.setStyleSheet('''
             QWidget { background: #f7f7fa; }
             QTableWidget { background: #fff; border: 1px solid #bbb; border-radius: 6px; font-size: 13px; }
@@ -923,12 +1311,12 @@ class MainWindow(QMainWindow):
             QSplitter::handle:hover { background: #0078d7; }
         ''')
         print('after setStyleSheet')
-        # --- Status Bar ---
+        # --- 📊 Status Bar ---
         self.progress_bar = QProgressBar()
         self.statusBar().addPermanentWidget(self.progress_bar)
         self.progress_bar.hide()
         print('after status bar')
-        # --- Connections ---
+        # --- 🔗 Connections ---
         self.grp_a.dir_btn.clicked.connect(lambda: self.load_files(self.grp_a, 'A'))
         self.grp_b.dir_btn.clicked.connect(lambda: self.load_files(self.grp_b, 'B'))
         self.grp_a.table.itemSelectionChanged.connect(self.update_slider)
