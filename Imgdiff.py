@@ -12,6 +12,10 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 os.environ["QT_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Функциональность смещения изображений
+        # Панель управления смещением скрыта, будет реализована позже
+        # ✅ НАВИГАЦИЯ РАБОТАЕТ: Кнопки ◀▶ для переключения между парами изображений
+
 # flake8: noqa: E402
 from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint
 from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter
@@ -25,6 +29,7 @@ from PyQt5.QtWidgets import (
 
 from core.diff_two_color import diff_two_color
 from core.slider_reveal import SliderReveal
+# Временно отключена функциональность смещения изображений
 from core.image_alignment import ImageAlignmentManager
 from core.alignment_controls import AlignmentControlPanel
 
@@ -707,7 +712,7 @@ class MainWindow(QMainWindow):
         self.dir_a = self.settings.value("dir_a", "")
         self.dir_b = self.settings.value("dir_b", "")
         
-        # Инициализируем менеджер смещения изображений
+        # Инициализируем менеджер смещения изображений (временно отключен)
         self.alignment_manager = None  # Будет инициализирован при выборе папки вывода
         self.alignment_control_panel = None  # Будет создан при инициализации UI
         
@@ -1208,6 +1213,7 @@ class MainWindow(QMainWindow):
         
         self.prev_btn = QPushButton("◀")
         self.prev_btn.setFixedWidth(32)
+        self.prev_btn.setToolTip("Предыдущая пара изображений (←)")
         self.prev_btn.setStyleSheet("""
             QPushButton {
                 background: #9c27b0;
@@ -1221,9 +1227,11 @@ class MainWindow(QMainWindow):
                 background: #7b1fa2;
             }
         """)
-        self.prev_btn.clicked.connect(lambda: self.navigate_result(-1))
+        self.prev_btn.clicked.connect(self.navigate_previous)
+        
         self.next_btn = QPushButton("▶")
         self.next_btn.setFixedWidth(32)
+        self.next_btn.setToolTip("Следующая пара изображений (→)")
         self.next_btn.setStyleSheet("""
             QPushButton {
                 background: #9c27b0;
@@ -1237,7 +1245,7 @@ class MainWindow(QMainWindow):
                 background: #7b1fa2;
             }
         """)
-        self.next_btn.clicked.connect(lambda: self.navigate_result(1))
+        self.next_btn.clicked.connect(self.navigate_next)
         self.slider_control.addWidget(self.overlay_chk)
         self.slider_control.addWidget(self.fit_to_window_btn)
         self.slider_control.addStretch(1)
@@ -1246,7 +1254,25 @@ class MainWindow(QMainWindow):
         self.slider_layout.addLayout(self.slider_control)
         self.slider_header = QHBoxLayout()
         self.label_a = QLabel("A: <не выбрано>")
+        self.label_a.setStyleSheet("""
+            QLabel {
+                font-weight: bold;
+                color: #1976d2;
+                padding: 4px;
+                background: #e3f2fd;
+                border-radius: 4px;
+            }
+        """)
         self.label_b = QLabel("B: <не выбрано>")
+        self.label_b.setStyleSheet("""
+            QLabel {
+                font-weight: bold;
+                color: #388e3c;
+                padding: 4px;
+                background: #e8f5e8;
+                border-radius: 4px;
+            }
+        """)
         self.slider_header.addWidget(self.label_a)
         self.slider_header.addStretch(1)
         self.slider_header.addWidget(self.label_b)
@@ -1255,13 +1281,15 @@ class MainWindow(QMainWindow):
         self.slider_layout.addWidget(self.slider_reveal, 1)
         self.slider_reveal.setVisible(True)
         
-        # Добавляем панель управления смещением
+        # Добавляем панель управления смещением (временно скрыта)
         if self.output_dir:
             self.alignment_manager = ImageAlignmentManager(self.output_dir)
         else:
             self.alignment_manager = ImageAlignmentManager("")
         self.alignment_control_panel = AlignmentControlPanel(self.alignment_manager)
         self.alignment_control_panel.alignment_changed.connect(self.on_alignment_changed)
+        # Временно скрываем панель смещения
+        self.alignment_control_panel.setVisible(False)
         self.slider_layout.addWidget(self.alignment_control_panel)
         
         self.slider_widget.setMinimumWidth(600)  # Увеличиваем зону превью в 1.5 раза
@@ -1359,10 +1387,12 @@ class MainWindow(QMainWindow):
             self.settings.setValue("output_dir", dir_path)
             self.update_out_dir_label()
             
-            # Инициализируем менеджер смещения для новой папки
+            # Инициализируем менеджер смещения для новой папки (временно скрыт)
             self.alignment_manager = ImageAlignmentManager(dir_path)
             if self.alignment_control_panel:
                 self.alignment_control_panel.alignment_manager = self.alignment_manager
+                # Временно скрываем панель смещения
+                self.alignment_control_panel.setVisible(False)
             
             self.load_results_from_output_dir()
             self.update_save_button_state()  # Обновляем состояние кнопки сохранения
@@ -1634,7 +1664,7 @@ class MainWindow(QMainWindow):
         return 1 if meta['diff_pixels'] > 0 else 0
 
     def update_slider(self):
-        # Используем новую логику с учетом смещения
+        # Используем новую логику с учетом смещения (временно отключено)
         self.update_slider_with_alignment()
 
     def update_slider_pair(self):
@@ -1788,8 +1818,10 @@ class MainWindow(QMainWindow):
         self.show_result_image_from_selection()
 
     def keyPressEvent(self, e):
+        """Обработка нажатий клавиш для навигации"""
         if self.tabs.currentWidget() == self.slider_widget:
             if not self.overlay_chk.isChecked():
+                # В режиме результата - навигация по результатам
                 if e.key() == Qt.Key.Key_Right:
                     self.navigate_result(1)
                     return
@@ -1797,23 +1829,87 @@ class MainWindow(QMainWindow):
                     self.navigate_result(-1)
                     return
             else:
+                # В режиме overlay - навигация по парам изображений
                 if e.key() == Qt.Key.Key_Right:
                     self.navigate_tables(1)
+                    return
                 elif e.key() == Qt.Key.Key_Left:
                     self.navigate_tables(-1)
+                    return
         super().keyPressEvent(e)
 
+    def navigate_previous(self):
+        """Переход к предыдущей паре изображений"""
+        self.navigate_tables(-1)
+    
+    def navigate_next(self):
+        """Переход к следующей паре изображений"""
+        self.navigate_tables(1)
+    
     def navigate_tables(self, delta):
-        # Перемещаем выделение в обеих таблицах
+        """Перемещает выделение между парами изображений в таблицах A и B"""
+        # Получаем количество строк в обеих таблицах
+        rows_a = self.grp_a.table.rowCount()
+        rows_b = self.grp_b.table.rowCount()
+        
+        if rows_a == 0 or rows_b == 0:
+            return  # Нет изображений для навигации
+        
+        # Получаем текущие выделенные строки
         curr_a = self.grp_a.table.currentRow()
-        new_a = curr_a + delta
-        if 0 <= new_a < self.grp_a.table.rowCount():
-            self.grp_a.table.selectRow(new_a)
-
         curr_b = self.grp_b.table.currentRow()
-        new_b = curr_b + delta
-        if 0 <= new_b < self.grp_b.table.rowCount():
-            self.grp_b.table.selectRow(new_b)
+        
+        # Определяем, какая таблица активна (имеет выделение)
+        if curr_a >= 0 and curr_b >= 0:
+            # Обе таблицы имеют выделение - перемещаем обе
+            new_a = curr_a + delta
+            new_b = curr_b + delta
+        elif curr_a >= 0:
+            # Только таблица A имеет выделение
+            new_a = curr_a + delta
+            new_b = new_a  # Синхронизируем с A
+        elif curr_b >= 0:
+            # Только таблица B имеет выделение
+            new_b = curr_b + delta
+            new_a = new_b  # Синхронизируем с B
+        else:
+            # Нет выделения - начинаем с начала или конца
+            if delta > 0:
+                new_a = 0
+                new_b = 0
+            else:
+                new_a = rows_a - 1
+                new_b = rows_b - 1
+        
+        # Применяем циклическую навигацию
+        new_a = new_a % rows_a
+        new_b = new_b % rows_b
+        
+        # Применяем выделение
+        self.grp_a.table.selectRow(new_a)
+        self.grp_b.table.selectRow(new_b)
+        
+        # Обновляем слайдер с новым выделением
+        self.update_slider()
+        
+        # Показываем информацию о текущей паре
+        self.show_navigation_info(new_a, new_b)
+
+    def show_navigation_info(self, row_a, row_b):
+        """Показывает информацию о текущей паре изображений"""
+        rows_a = self.grp_a.table.rowCount()
+        rows_b = self.grp_b.table.rowCount()
+        
+        if rows_a > 0 and rows_b > 0:
+            # Обновляем заголовки слайдера с информацией о позиции
+            file_a_name = self.grp_a.table.item(row_a, 0).text() if row_a < rows_a else "N/A"
+            file_b_name = self.grp_b.table.item(row_b, 0).text() if row_b < rows_b else "N/A"
+            
+            self.label_a.setText(f"A: {file_a_name} ({row_a + 1}/{rows_a})")
+            self.label_b.setText(f"B: {file_b_name} ({row_b + 1}/{rows_b})")
+            
+            # Показываем краткое уведомление в статусной строке
+            self.statusBar().showMessage(f"Пара {row_a + 1}/{rows_a}: {file_a_name} ↔ {file_b_name}", 2000)
 
     def closeEvent(self, event):
         self.save_state()
@@ -1915,11 +2011,13 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         
-        # Инициализируем менеджер смещения если есть папка вывода
+        # Инициализируем менеджер смещения если есть папка вывода (временно скрыт)
         if self.output_dir:
             self.alignment_manager = ImageAlignmentManager(self.output_dir)
             if self.alignment_control_panel:
                 self.alignment_control_panel.alignment_manager = self.alignment_manager
+                # Временно скрываем панель смещения
+                self.alignment_control_panel.setVisible(False)
         
         # Обновляем состояние кнопки сохранения после восстановления состояния
         self.update_save_button_state()
@@ -2126,12 +2224,15 @@ class MainWindow(QMainWindow):
         self.save_overlay_btn.setEnabled(should_enable)
     
     def on_alignment_changed(self, offset_x: int, offset_y: int):
-        """Обработчик изменения смещения изображений"""
+        """Обработчик изменения смещения изображений (временно отключен)"""
         # Обновляем слайдер с новым смещением
         self.update_slider_with_alignment()
     
     def update_slider_with_alignment(self):
-        """Обновляет слайдер с учетом смещения изображений"""
+        """Обновляет слайдер с учетом смещения изображений (временно отключено)"""
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Функциональность смещения изображений будет реализована позже
+        # Пока используем простую логику без смещения
+        
         files_a = self.grp_a.selected_files()
         files_b = self.grp_b.selected_files()
         file_a = files_a[0] if files_a else None
@@ -2140,8 +2241,8 @@ class MainWindow(QMainWindow):
         self.label_a.setText(f"A: {Path(file_a).name if file_a else '<не выбрано>'}")
         self.label_b.setText(f"B: {Path(file_b).name if file_b else '<не выбрано>'}")
 
-        if file_a and file_b and self.alignment_manager:
-            # Загружаем изображения в оригинальном разрешении
+        if file_a and file_b:
+            # Загружаем изображения в оригинальном разрешении (без смещения)
             img_a_cv = safe_cv2_imread(file_a)
             img_b_cv = safe_cv2_imread(file_b)
             if img_a_cv is not None and img_b_cv is not None:
@@ -2150,17 +2251,17 @@ class MainWindow(QMainWindow):
                 img_a.setDevicePixelRatio(1.0)
                 img_b.setDevicePixelRatio(1.0)
                 
-                # Применяем смещение
-                aligned_a, aligned_b = self.alignment_manager.apply_alignment_to_pixmaps(
-                    img_a, img_b, file_a, file_b
-                )
+                # ВРЕМЕННО: Не применяем смещение
+                # aligned_a, aligned_b = self.alignment_manager.apply_alignment_to_pixmaps(
+                #     img_a, img_b, file_a, file_b
+                # )
                 
-                self.slider_reveal.setPixmaps(aligned_a, aligned_b)
+                self.slider_reveal.setPixmaps(img_a, img_b)
                 self.slider_reveal.setVisible(True)
                 
-                # Обновляем панель управления смещением
-                if self.alignment_control_panel:
-                    self.alignment_control_panel.set_current_images(file_a, file_b, img_a, img_b)
+                # ВРЕМЕННО: Не обновляем панель управления смещением
+                # if self.alignment_control_panel:
+                #     self.alignment_control_panel.set_current_images(file_a, file_b, img_a, img_b)
                 
                 # Обновляем состояние кнопки сохранения
                 self.update_save_button_state()
