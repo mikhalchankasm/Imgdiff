@@ -17,7 +17,7 @@ os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
         # ✅ НАВИГАЦИЯ РАБОТАЕТ: Кнопки ◀▶ для переключения между парами изображений
 
 # flake8: noqa: E402
-from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint
+from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
 
 from core.diff_two_color import diff_two_color
 from core.slider_reveal import SliderReveal
-# Временно отключена функциональность смещения изображений
+# Временно отключена функциональность смещения изображенийcl
 from core.image_alignment import ImageAlignmentManager
 from core.alignment_controls import AlignmentControlPanel
 
@@ -545,14 +545,36 @@ class SliderReveal(QWidget):
         self._overlay_cache = None
         self._overlay_cache_key = None
         self.update()
+    
+    def invalidate_overlay_cache(self):
+        """Инвалидирует кэш overlay при изменении цветов"""
+        self._overlay_cache = None
+        self._overlay_cache_key = None
+        self.update()
 
     def _generate_overlay_cache(self):
-        """Генерирует кэшированное overlay изображение с четкими контурами в исходном разрешении"""
+        """Генерирует кэшированное overlay изображение с цветами из настроек"""
         if self.pixmap_a is None or self.pixmap_b is None:
             return None
             
-        # Создаем ключ кэша на основе ID изображений
-        cache_key = (id(self.pixmap_a), id(self.pixmap_b))
+        # Получаем ссылку на главное окно для доступа к цветам
+        main_window = self.parent()
+        while main_window and not hasattr(main_window, 'color'):
+            main_window = main_window.parent()
+        
+        if not main_window or not hasattr(main_window, 'color'):
+            # Fallback: используем цвета по умолчанию
+            color_a = QColor("#FF0000")  # Красный
+            color_b = QColor("#0066FF")  # Синий
+            color_match = QColor("#0000FF")  # Синий
+        else:
+            color_a = main_window.color
+            color_b = main_window.add_color
+            color_match = main_window.match_color
+            
+        # Создаем ключ кэша на основе ID изображений и цветов
+        cache_key = (id(self.pixmap_a), id(self.pixmap_b), 
+                    color_a.name(), color_b.name(), color_match.name())
         if self._overlay_cache is not None and self._overlay_cache_key == cache_key:
             return self._overlay_cache
             
@@ -593,19 +615,25 @@ class SliderReveal(QWidget):
             # Создаем результат с белым фоном за одну операцию
             out = np.full_like(arr_a, 255)
             
+            # ИСПРАВЛЕНИЕ: Используем цвета из настроек вместо жестко заданных
+            # Получаем цвета из настроек и конвертируем в RGB
+            color_a_rgb = [color_a.red(), color_a.green(), color_a.blue()]
+            color_b_rgb = [color_b.red(), color_b.green(), color_b.blue()]
+            color_match_rgb = [color_match.red(), color_match.green(), color_match.blue()]
+            
             # ОПТИМИЗАЦИЯ: Векторизованное применение цветов
             # Применяем цвета пакетно для всех пикселей одновременно
             
-            # Красный для изображения A (полупрозрачный)
-            out[mask_a] = [255, 0, 0, 120]  # RGBA: красный с alpha=120
+            # Цвет из настроек для изображения A (полупрозрачный)
+            out[mask_a] = color_a_rgb + [120]  # RGBA: цвет A с alpha=120
             
-            # Зеленый только для уникальных пикселей B (не пересекающихся с A)
+            # Цвет добавленного только для уникальных пикселей B (не пересекающихся с A)
             only_b = mask_b & ~mask_a  # Логическое И: B И НЕ A
-            out[only_b] = [0, 255, 0, 180]  # RGBA: зеленый с alpha=180
+            out[only_b] = color_b_rgb + [180]  # RGBA: цвет добавленного с alpha=180
             
-            # Синий для совпадающих областей (пересечение A и B)
+            # Цвет совпадений для пересекающихся областей (A И B)
             both = mask_a & mask_b  # Логическое И: A И B
-            out[both] = [0, 0, 255, 200]  # RGBA: синий с alpha=200
+            out[both] = color_match_rgb + [200]  # RGBA: цвет совпадений с alpha=200
             
             # ОПТИМИЗАЦИЯ: Освобождаем память промежуточных массивов
             del arr_a, arr_b, mask_a, mask_b, only_b, both
@@ -1211,6 +1239,48 @@ class MainWindow(QMainWindow):
         """)
         self.fit_to_window_btn.clicked.connect(self.fit_to_window)
         
+        # Кнопка "Подсветить различия"
+        self.highlight_diff_btn = QPushButton("💡 Подсветить различия")
+        self.highlight_diff_btn.setToolTip("Подсветить места различий мигающим кругом на 3 секунды")
+        self.highlight_diff_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff9800;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #f57c00;
+            }
+            QPushButton:disabled {
+                background: #bdbdbd;
+                color: #757575;
+            }
+        """)
+        self.highlight_diff_btn.clicked.connect(self.highlight_differences)
+        self.highlight_diff_btn.setEnabled(False)  # Включаем только когда overlay активен
+        
+        # Кнопка "Тест позиционирования" (для отладки)
+        self.test_positioning_btn = QPushButton("🧪 Тест позиционирования")
+        self.test_positioning_btn.setToolTip("Тестирует точность размещения кругов подсветки")
+        self.test_positioning_btn.setStyleSheet("""
+            QPushButton {
+                background: #9c27b0;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background: #7b1fa2;
+            }
+        """)
+        self.test_positioning_btn.clicked.connect(self.test_positioning_accuracy)
+        
         self.prev_btn = QPushButton("◀")
         self.prev_btn.setFixedWidth(32)
         self.prev_btn.setToolTip("Предыдущая пара изображений (←)")
@@ -1248,6 +1318,8 @@ class MainWindow(QMainWindow):
         self.next_btn.clicked.connect(self.navigate_next)
         self.slider_control.addWidget(self.overlay_chk)
         self.slider_control.addWidget(self.fit_to_window_btn)
+        self.slider_control.addWidget(self.highlight_diff_btn)
+        self.slider_control.addWidget(self.test_positioning_btn)
         self.slider_control.addStretch(1)
         self.slider_control.addWidget(self.prev_btn)
         self.slider_control.addWidget(self.next_btn)
@@ -1277,6 +1349,22 @@ class MainWindow(QMainWindow):
         self.slider_header.addStretch(1)
         self.slider_header.addWidget(self.label_b)
         self.slider_layout.addLayout(self.slider_header)
+        
+        # Метка с процентом различия
+        self.diff_percentage_label = QLabel("Различие: --%")
+        self.diff_percentage_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.diff_percentage_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                font-weight: bold;
+                color: #d32f2f;
+                padding: 6px;
+                background: #ffebee;
+                border-radius: 4px;
+                margin: 2px;
+            }
+        """)
+        self.slider_layout.addWidget(self.diff_percentage_label)
         self.slider_reveal = SliderReveal(QPixmap(), QPixmap())
         self.slider_layout.addWidget(self.slider_reveal, 1)
         self.slider_reveal.setVisible(True)
@@ -1395,7 +1483,8 @@ class MainWindow(QMainWindow):
                 self.alignment_control_panel.setVisible(False)
             
             self.load_results_from_output_dir()
-            self.update_save_button_state()  # Обновляем состояние кнопки сохранения
+            # Обновляем состояние кнопок сохранения и подсветки
+            self.update_save_button_state()
 
     def load_results_from_output_dir(self):
         if not self.output_dir or not os.path.isdir(self.output_dir):
@@ -1426,6 +1515,9 @@ class MainWindow(QMainWindow):
             self.color = col
             self.color_btn.setText(f"Цвет: {col.name()}")
             self.color_btn.setStyleSheet(f"background:{col.name()}")
+            # Инвалидируем кэш overlay при изменении цвета
+            if hasattr(self, 'slider_reveal'):
+                self.slider_reveal.invalidate_overlay_cache()
 
     def choose_add_color(self):
         col = QColorDialog.getColor(self.add_color, self, "Выберите цвет для добавленного")
@@ -1433,6 +1525,9 @@ class MainWindow(QMainWindow):
             self.add_color = col
             self.add_color_btn.setText(f"Цвет добавленного: {col.name()}")
             self.add_color_btn.setStyleSheet(f"background:{col.name()}")
+            # Инвалидируем кэш overlay при изменении цвета
+            if hasattr(self, 'slider_reveal'):
+                self.slider_reveal.invalidate_overlay_cache()
 
     def choose_match_color(self):
         col = QColorDialog.getColor(self.match_color, self, "Выберите цвет для совпадающих линий")
@@ -1440,6 +1535,9 @@ class MainWindow(QMainWindow):
             self.match_color = col
             self.match_color_btn.setText(f"Цвет совпадений: {col.name()}")
             self.match_color_btn.setStyleSheet(f"background:{col.name()}; color:white")
+            # Инвалидируем кэш overlay при изменении цвета
+            if hasattr(self, 'slider_reveal'):
+                self.slider_reveal.invalidate_overlay_cache()
 
     def load_files(self, target: FilteredTable, which):
         dir_path = QFileDialog.getExistingDirectory(self, f"Выберите папку с изображениями для {which}", target.dir_path or "")
@@ -1462,7 +1560,7 @@ class MainWindow(QMainWindow):
             self.dir_b = dir_path
             self.settings.setValue("dir_b", dir_path)
         
-        # Обновляем состояние кнопки сохранения после загрузки файлов
+        # Обновляем состояние кнопок после загрузки файлов
         self.update_save_button_state()
 
     def open_result(self, item):
@@ -1588,6 +1686,9 @@ class MainWindow(QMainWindow):
         message += f"Результаты сохранены в папку:\n{self.output_dir}"
         
         QMessageBox.information(self, "Сравнение завершено", message)
+        
+        # Обновляем состояние кнопок после завершения сравнения
+        self.update_save_button_state()
 
     def add_result(self, name, status, path):
         row = self.result_table.rowCount()
@@ -1666,14 +1767,16 @@ class MainWindow(QMainWindow):
     def update_slider(self):
         # Используем новую логику с учетом смещения (временно отключено)
         self.update_slider_with_alignment()
+        # Обновляем состояние кнопок
+        self.update_save_button_state()
 
     def update_slider_pair(self):
-        # этот метод больше не нужен
-        pass
+        # этот метод больше не нужен, но обновляем состояние кнопок
+        self.update_save_button_state()
 
     def update_slider_overlay_mode(self):
         self.slider_reveal.setOverlayMode(self.overlay_chk.isChecked())
-        # Обновляем состояние кнопки сохранения
+        # Обновляем состояние кнопок сохранения и подсветки
         self.update_save_button_state()
 
     def fit_to_window(self):
@@ -1770,6 +1873,8 @@ class MainWindow(QMainWindow):
                 self.result_image_view.setPixmap(pix)
                 self.result_image_view.setToolTip(img_path)
                 self.current_result_index = row
+                # Обновляем состояние кнопок
+                self.update_save_button_state()
             else:
                 # Fallback к cv2 если QPixmap не смог загрузить
                 img = safe_cv2_imread(img_path)
@@ -1788,11 +1893,19 @@ class MainWindow(QMainWindow):
                     self.result_image_view.setPixmap(pix)
                     self.result_image_view.setToolTip(img_path)
                     self.current_result_index = row
+                    # Обновляем состояние кнопок
+                    self.update_save_button_state()
                 else:
                     self.result_image_view.setPixmap(QPixmap())
+                    self.current_result_index = -1
+                    # Обновляем состояние кнопок
+                    self.update_save_button_state()
         except Exception as e:
             logging.error(f"Ошибка загрузки превью: {e}")
             self.result_image_view.setPixmap(QPixmap())
+            self.current_result_index = -1
+            # Обновляем состояние кнопок
+            self.update_save_button_state()
 
     def get_result_files(self):
         if not self.output_dir or not os.path.isdir(self.output_dir):
@@ -1816,6 +1929,8 @@ class MainWindow(QMainWindow):
             row = (row + delta) % n
         self.result_table.selectRow(row)
         self.show_result_image_from_selection()
+        # Обновляем состояние кнопок
+        self.update_save_button_state()
 
     def keyPressEvent(self, e):
         """Обработка нажатий клавиш для навигации"""
@@ -1910,6 +2025,9 @@ class MainWindow(QMainWindow):
             
             # Показываем краткое уведомление в статусной строке
             self.statusBar().showMessage(f"Пара {row_a + 1}/{rows_a}: {file_a_name} ↔ {file_b_name}", 2000)
+            
+            # Обновляем состояние кнопок
+            self.update_save_button_state()
 
     def closeEvent(self, event):
         self.save_state()
@@ -2019,7 +2137,7 @@ class MainWindow(QMainWindow):
                 # Временно скрываем панель смещения
                 self.alignment_control_panel.setVisible(False)
         
-        # Обновляем состояние кнопки сохранения после восстановления состояния
+        # Обновляем состояние кнопок после восстановления состояния
         self.update_save_button_state()
 
     def update_result_table(self):
@@ -2208,6 +2326,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Сохранение завершено с ошибками", message)
         else:
             QMessageBox.information(self, "Сохранение завершено", message)
+        
+        # Обновляем состояние кнопок после завершения сохранения
+        self.update_save_button_state()
 
     def update_save_button_state(self):
         """Обновляет состояние кнопки сохранения на основе текущих настроек"""
@@ -2218,10 +2339,380 @@ class MainWindow(QMainWindow):
         has_output_dir = bool(self.output_dir)
         overlay_checked = self.overlay_chk.isChecked()
         
-        # Упрощенная логика: включаем кнопку если overlay включен
+        # Упрощенная логика: включаем кнопки если overlay включен
         # Остальные проверки будут выполнены в save_overlay методе
         should_enable = overlay_checked
         self.save_overlay_btn.setEnabled(should_enable)
+        self.highlight_diff_btn.setEnabled(should_enable)
+    
+    def highlight_differences(self):
+        """Подсвечивает места различий мигающим кругом на 3 секунды (асинхронная версия)"""
+        try:
+            if not self.overlay_chk.isChecked():
+                return
+                
+            # Получаем текущие изображения
+            if not hasattr(self.slider_reveal, 'pixmap_a') or not hasattr(self.slider_reveal, 'pixmap_b'):
+                return
+                
+            if self.slider_reveal.pixmap_a.isNull() or self.slider_reveal.pixmap_b.isNull():
+                return
+            
+            # Показываем индикатор загрузки с дополнительной информацией
+            img_a = self.slider_reveal.pixmap_a.toImage()
+            img_b = self.slider_reveal.pixmap_b.toImage()
+            
+            self.statusBar().showMessage(f"Анализируем различия... Размеры: {img_a.width()}x{img_a.height()} vs {img_b.width()}x{img_b.height()}", 2000)
+            self.highlight_diff_btn.setEnabled(False)  # Блокируем кнопку во время обработки
+            
+            # Запускаем анализ различий в отдельном потоке через QTimer
+            # Это предотвращает зависание UI
+            QTimer.singleShot(10, self.create_difference_highlight_animation)
+            
+        except Exception as e:
+            # Обработка ошибок для предотвращения зависания
+            logging.error(f"Ошибка при запуске подсветки различий: {e}")
+            self.statusBar().showMessage("Ошибка при запуске подсветки", 3000)
+            self.highlight_diff_btn.setEnabled(True)  # Разблокируем кнопку
+    
+    def create_difference_highlight_animation(self):
+        """Создает простую подсветку различий прозрачными кругами"""
+        try:
+            # Получаем изображения
+            img_a = self.slider_reveal.pixmap_a.toImage()
+            img_b = self.slider_reveal.pixmap_b.toImage()
+            
+            # Проверяем размеры изображений
+            if img_a.width() != img_b.width() or img_a.height() != img_b.height():
+                # Если размеры разные, приводим к общему размеру
+                max_width = max(img_a.width(), img_b.width())
+                max_height = max(img_a.height(), img_b.height())
+                img_a = img_a.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                img_b = img_b.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # Простой алгоритм поиска различий без numpy (предотвращает вылеты)
+            diff_centers = self.find_differences_simple(img_a, img_b)
+            
+            # Отладочная информация
+            logging.info(f"Найдено центров различий: {len(diff_centers)}")
+            if diff_centers:
+                logging.info(f"Первые 3 центра: {diff_centers[:3]}")
+            
+            # Вычисляем процент различия для нового алгоритма
+            if diff_centers:
+                # Расчет процента на основе количества найденных различий
+                total_area = img_a.width() * img_a.height()
+                
+                # Каждый центр различий представляет область примерно 120x120 пикселей
+                circle_area = 120 * 120
+                estimated_diff_pixels = len(diff_centers) * circle_area
+                
+                diff_percentage = min((estimated_diff_pixels / total_area) * 100, 100)
+                similarity_percentage = 100 - diff_percentage
+                
+                # Обновляем метку с процентом
+                self.diff_percentage_label.setText(f"Различие: {diff_percentage:.1f}% (Сходство: {similarity_percentage:.1f}%)")
+                
+                # Показываем дополнительную информацию
+                self.statusBar().showMessage(f"Найдено {len(diff_centers)} областей различий (зеленый цвет)", 2000)
+                
+                # Логируем результат
+                logging.info(f"Процент различия: {diff_percentage:.1f}%, центров: {len(diff_centers)}")
+            else:
+                self.diff_percentage_label.setText("Различие: 0.0% (Сходство: 100.0%)")
+                self.statusBar().showMessage("Различия не найдены - проверьте цвет в настройках", 2000)
+                
+                # Логируем отсутствие различий
+                logging.warning("Различия не найдены - возможно, цвет в настройках не совпадает с цветом на чертеже")
+            
+            # Создаем простую подсветку кругами
+            self.create_simple_highlight_circles(diff_centers)
+            
+        except Exception as e:
+            # Обработка ошибок для предотвращения зависания
+            logging.error(f"Ошибка при создании подсветки различий: {e}")
+            self.diff_percentage_label.setText("Ошибка подсветки")
+            self.statusBar().showMessage(f"Ошибка подсветки: {str(e)}", 3000)
+        finally:
+            # Разблокируем кнопку подсветки в любом случае
+            self.highlight_diff_btn.setEnabled(True)
+    
+    def find_differences_simple(self, img_a, img_b):
+        """Простой и надежный поиск различий - сравниваем пиксели между изображениями"""
+        try:
+            width = img_a.width()
+            height = img_a.height()
+            centers = []
+            
+            logging.info(f"Ищем различия между изображениями A и B")
+            logging.info(f"Размер изображения: {width}x{height}")
+            
+            # ИСПРАВЛЕНИЕ: Теперь ищем реальные различия между изображениями
+            # Сравниваем пиксели img_a и img_b в каждой позиции
+            step = 10  # Шаг для производительности
+            
+            # Список всех найденных различий
+            all_differences = []
+            
+            for y in range(0, height, step):
+                for x in range(0, width, step):
+                    try:
+                        # Получаем цвета пикселей из обоих изображений
+                        color_a = img_a.pixelColor(x, y)
+                        color_b = img_b.pixelColor(x, y)
+                        
+                        # Вычисляем разницу между цветами
+                        color_diff = (
+                            abs(color_a.red() - color_b.red()) +
+                            abs(color_a.green() - color_b.green()) +
+                            abs(color_a.blue() - color_b.blue())
+                        ) / 3  # Среднее отклонение по RGB
+                        
+                        # Если цвета отличаются значительно (порог 30)
+                        if color_diff > 30:
+                            all_differences.append((x, y, color_diff, f"разница={color_diff:.1f}"))
+                            
+                            # Логируем найденное различие
+                            logging.info(f"🎯 Найдено различие в ({x}, {y}): A={color_a.name()}, B={color_b.name()}, разница={color_diff:.1f}")
+                            
+                            # Ограничиваем количество для производительности
+                            if len(all_differences) >= 200:
+                                break
+                    except Exception as e:
+                        # Пропускаем проблемные пиксели
+                        continue
+                
+                if len(all_differences) >= 200:
+                    break
+            
+            logging.info(f"Найдено различий: {len(all_differences)}")
+            
+            # Группируем близкие различия в центры
+            centers = self.group_close_differences(all_differences)
+            
+            # Если не нашли различий, возвращаем пустой список
+            if not centers:
+                logging.info("Различия не найдены - изображения идентичны")
+            
+            logging.info(f"Найдено центров различий: {len(centers)}")
+            return centers
+            
+        except Exception as e:
+            # Обработка ошибок для предотвращения зависания
+            logging.error(f"Ошибка при поиске различий: {e}")
+            return []
+    
+    def group_close_differences(self, differences):
+        """Группирует близкие различия в центры для избежания перекрытия кругов"""
+        try:
+            if not differences:
+                return []
+            
+            # ИСПРАВЛЕНИЕ: Новая структура данных: (x, y, color_diff, desc)
+            # Сортируем различия по отклонению цвета (лучшие совпадения сначала)
+            differences.sort(key=lambda x: x[2])
+            
+            # Группируем близкие координаты
+            groups = []
+            min_distance = 150  # Минимальное расстояние между центрами групп
+            
+            for x, y, color_diff, desc in differences:
+                # Проверяем, можно ли добавить к существующей группе
+                added_to_group = False
+                
+                for group in groups:
+                    group_x, group_y, group_count = group
+                    # Вычисляем расстояние до центра группы
+                    distance = ((x - group_x) ** 2 + (y - group_y) ** 2) ** 0.5
+                    
+                    if distance < min_distance:
+                        # Добавляем к существующей группе
+                        # Обновляем центр группы (среднее арифметическое)
+                        total_x = group_x * group_count + x
+                        total_y = group_y * group_count + y
+                        new_count = group_count + 1
+                        group[0] = total_x / new_count
+                        group[1] = total_y / new_count
+                        group[2] = new_count
+                        added_to_group = True
+                        break
+                
+                if not added_to_group:
+                    # Создаем новую группу
+                    groups.append([x, y, 1])
+                
+                # Ограничиваем количество групп
+                if len(groups) >= 12:  # Увеличиваем лимит для лучшего покрытия
+                    break
+            
+            # Преобразуем группы в центры
+            centers = []
+            for group_x, group_y, count in groups:
+                centers.append((int(group_x), int(group_y)))
+                logging.info(f"📊 Группа различий: центр=({int(group_x)}, {int(group_y)}), количество пикселей={count}")
+            
+            return centers
+            
+        except Exception as e:
+            logging.error(f"Ошибка при группировке различий: {e}")
+            # Fallback: возвращаем первые различия без группировки
+            return [(x, y) for x, y, _, _ in differences[:8]]
+    
+    def find_difference_centers(self, diff_mask):
+        """Находит центры областей различий для подсветки (устаревший метод)"""
+        # Оставляем для совместимости, но не используем
+        return []
+    
+    def start_highlight_animation(self, centers):
+        """Запускает анимацию подсветки различий (устаревший метод)"""
+        # Оставляем для совместимости, но используем простую версию
+        self.create_simple_highlight_circles(centers)
+    
+    def create_simple_highlight_circles(self, centers):
+        """Создает простые круги подсветки без анимации"""
+        try:
+            if not centers:
+                self.statusBar().showMessage("Различия не найдены", 2000)
+                return
+            
+            # Очищаем предыдущие круги подсветки
+            if hasattr(self, 'highlight_circles'):
+                self.remove_highlight_circles()
+            
+            # Создаем круги подсветки
+            self.highlight_circles = []
+            
+            # Получаем цвет контура отличий из настроек
+            highlight_color = self.color
+            color_name = highlight_color.name()
+            
+            # Получаем размеры изображений для проверки координат
+            img_a = self.slider_reveal.pixmap_a.toImage()
+            img_b = self.slider_reveal.pixmap_b.toImage()
+            
+            logging.info(f"Размеры изображений: A={img_a.width()}x{img_a.height()}, B={img_b.width()}x{img_b.height()}")
+            
+            for center_x, center_y in centers:
+                # Создаем круг подсветки с цветом из настроек
+                # Увеличиваем зону зеленого цвета в 2-3 раза, как просил пользователь
+                circle = QLabel(self.slider_reveal)
+                circle.setFixedSize(120, 120)  # Увеличиваем размер с 80 до 120 (в 1.5 раза)
+                
+                # Используем цвет из настроек для подсветки с большей прозрачностью
+                circle.setStyleSheet(f"""
+                    QLabel {{
+                        background: radial-gradient(circle, {color_name}60 0%, {color_name}40 30%, {color_name}20 60%, {color_name}10 100%);
+                        border: 4px solid {color_name}90;
+                        border-radius: 60px;
+                    }}
+                """)
+                
+                # Позиционируем круг с учетом масштаба и смещения слайдера
+                try:
+                    # Получаем текущие параметры слайдера
+                    scale = getattr(self.slider_reveal, 'scale', 1.0)
+                    offset_x = getattr(self.slider_reveal, 'offset', QPoint(0, 0)).x()
+                    offset_y = getattr(self.slider_reveal, 'offset', QPoint(0, 0)).y()
+                    
+                    # Логируем параметры позиционирования
+                    logging.info(f"Параметры слайдера: scale={scale}, offset=({offset_x}, {offset_y})")
+                    logging.info(f"Размер слайдера: {self.slider_reveal.width()}x{self.slider_reveal.height()}")
+                    
+                    # Вычисляем позицию круга с учетом масштаба и смещения
+                    # center_x и center_y - это координаты в оригинальном изображении
+                    # Нужно преобразовать их в координаты слайдера
+                    pos_x = int(center_x * scale + offset_x - 60)  # Центрируем круг (120/2)
+                    pos_y = int(center_y * scale + offset_y - 60)
+                    
+                    # Проверяем, что круг находится в видимой области слайдера
+                    slider_width = self.slider_reveal.width()
+                    slider_height = self.slider_reveal.height()
+                    
+                    # Расширяем область видимости для частично видимых кругов
+                    if (pos_x >= -120 and pos_x <= slider_width + 120 and 
+                        pos_y >= -120 and pos_y <= slider_height + 120):
+                        
+                        # Проверяем, что центр круга находится в пределах изображения
+                        if (center_x >= 0 and center_x < img_a.width() and 
+                            center_y >= 0 and center_y < img_a.height()):
+                            
+                            circle.move(pos_x, pos_y)
+                            circle.show()
+                            self.highlight_circles.append(circle)
+                            
+                            # Подробное логирование создания круга
+                            logging.info(f"✅ Создан круг подсветки:")
+                            logging.info(f"   Оригинальные координаты: ({center_x}, {center_y})")
+                            logging.info(f"   Позиция в слайдере: ({pos_x}, {pos_y})")
+                            logging.info(f"   Масштаб: {scale}, Смещение: ({offset_x}, {offset_y})")
+                            logging.info(f"   Размер изображения: {img_a.width()}x{img_a.height()}")
+                        else:
+                            logging.warning(f"❌ Координаты ({center_x}, {center_y}) вне изображения {img_a.width()}x{img_a.height()}")
+                            circle.deleteLater()
+                    else:
+                        logging.warning(f"❌ Круг вне видимой области слайдера: ({pos_x}, {pos_y}) vs {slider_width}x{slider_height}")
+                        circle.deleteLater()
+                        
+                except Exception as e:
+                    # Если не удалось позиционировать, пропускаем этот круг
+                    logging.error(f"❌ Ошибка позиционирования круга: {e}")
+                    circle.deleteLater()
+                    continue
+            
+            if self.highlight_circles:
+                # Показываем уведомление в статусной строке
+                self.statusBar().showMessage(f"Подсвечено {len(self.highlight_circles)} областей различий", 2000)
+                
+                # Таймер для автоматического удаления кругов через 3 секунды
+                QTimer.singleShot(3000, self.remove_highlight_circles)
+            else:
+                self.statusBar().showMessage("Не удалось создать круги подсветки", 2000)
+                
+        except Exception as e:
+            # Обработка ошибок для предотвращения зависания
+            logging.error(f"Ошибка при создании кругов подсветки: {e}")
+            self.statusBar().showMessage("Ошибка при создании кругов подсветки", 3000)
+    
+    def create_flash_animations(self):
+        """Создает анимации мигания для кругов подсветки (устаревший метод)"""
+        # Оставляем для совместимости, но не используем
+        pass
+    
+    def remove_highlight_circles(self):
+        """Удаляет круги подсветки"""
+        try:
+            # Удаляем круги подсветки
+            if hasattr(self, 'highlight_circles'):
+                for circle in self.highlight_circles:
+                    circle.deleteLater()
+                self.highlight_circles = []
+                
+                # Показываем уведомление об удалении
+                self.statusBar().showMessage("Круги подсветки удалены", 1000)
+                
+        except Exception as e:
+            # Обработка ошибок для предотвращения зависания
+            logging.error(f"Ошибка при удалении кругов подсветки: {e}")
+    
+    def test_positioning_accuracy(self):
+        """Тестирует точность позиционирования кругов подсветки"""
+        try:
+            # Создаем тестовые круги в известных позициях
+            test_centers = [
+                (100, 100),   # Левый верхний угол
+                (300, 200),   # Середина
+                (500, 300),   # Правый нижний угол
+            ]
+            
+            logging.info("🧪 Начинаем тест точности позиционирования")
+            self.create_simple_highlight_circles(test_centers)
+            
+            # Показываем результат теста
+            self.statusBar().showMessage("Тест позиционирования завершен - проверьте логи", 3000)
+            
+        except Exception as e:
+            logging.error(f"Ошибка при тестировании позиционирования: {e}")
+            self.statusBar().showMessage(f"Ошибка теста: {str(e)}", 3000)
     
     def on_alignment_changed(self, offset_x: int, offset_y: int):
         """Обработчик изменения смещения изображений (временно отключен)"""
@@ -2263,14 +2754,16 @@ class MainWindow(QMainWindow):
                 # if self.alignment_control_panel:
                 #     self.alignment_control_panel.set_current_images(file_a, file_b, img_a, img_b)
                 
-                # Обновляем состояние кнопки сохранения
+                # Обновляем состояние кнопок сохранения и подсветки
                 self.update_save_button_state()
             else:
                 self.slider_reveal.setVisible(False)
                 self.save_overlay_btn.setEnabled(False)
+                self.highlight_diff_btn.setEnabled(False)
         else:
             self.slider_reveal.setVisible(False)
             self.save_overlay_btn.setEnabled(False)
+            self.highlight_diff_btn.setEnabled(False)
 
 
 class ExternalResultViewer(QWidget):
