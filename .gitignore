@@ -134,6 +134,21 @@ imgdiff.log
 diff.log
 debug/
 
+# Build artifacts and executables
+build/
+dist/
+__pycache__/
+*.exe
+*.spec
+*.ico
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tif
+*.tiff
+*.log
+
 # IDE and editor files
 .vscode/
 .idea/
@@ -162,8 +177,14 @@ test_gui.py
 push_to_github.bat
 push_to_github.ps1
 diff_two_color.py  # дубликат файла из core/
+
+# Build scripts and batch files
 *.bat
 *.ps1
+build_*.py
+build_exe*.py
+create_icon.py
+*.spec
 
 # GitHub workflows (если не используются)
 .github/ 

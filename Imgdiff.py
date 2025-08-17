@@ -12,20 +12,21 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 os.environ["QT_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 
-        # ВРЕМЕННО ОТКЛЮЧЕНО: Функциональность смещения изображений
-        # Панель управления смещением скрыта, будет реализована позже
-        # ✅ НАВИГАЦИЯ РАБОТАЕТ: Кнопки ◀▶ для переключения между парами изображений
+# ВРЕМЕННО ОТКЛЮЧЕНО: Функциональность смещения изображений
+# Панель управления смещением скрыта, будет реализована позже
+# ✅ НАВИГАЦИЯ РАБОТАЕТ: Кнопки ◀▶ для переключения между парами изображений
 
 # flake8: noqa: E402
-from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter
+from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QMimeData
+from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter, QKeySequence, QDrag, QPen
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QFileDialog,
     QGroupBox, QRadioButton, QMessageBox, QSplitter, QSpinBox, QFormLayout,
     QButtonGroup, QColorDialog, QDoubleSpinBox, QTabWidget,
-    QComboBox, QProgressBar, QSizePolicy, QCheckBox
+    QComboBox, QProgressBar, QSizePolicy, QCheckBox, QShortcut, QMenu
 )
+# Дублирующиеся импорты убраны
 
 from core.diff_two_color import diff_two_color
 from core.slider_reveal import SliderReveal
@@ -108,6 +109,50 @@ class DndTableWidget(QTableWidget):
         dir_path = urls[0].toLocalFile()
         if os.path.isdir(dir_path):
             self.directory_dropped.emit(dir_path)
+    
+    def startDrag(self, actions):
+        """Начать перетаскивание выбранных элементов"""
+        try:
+            selected_items = self.selectedItems()
+            if not selected_items:
+                return
+            
+            # Создаем MIME данные с путями к файлам
+            mime_data = QMimeData()
+            urls = []
+            file_paths = []
+            
+            for item in selected_items:
+                if item.column() == 0:  # Только элементы первой колонки (имя файла)
+                    file_path = item.data(Qt.UserRole)
+                    if file_path and os.path.isfile(file_path):
+                        urls.append(QUrl.fromLocalFile(file_path))
+                        file_paths.append(file_path)
+            
+            if urls:
+                mime_data.setUrls(urls)
+                mime_data.setText('\n'.join(file_paths))
+                
+                # Создаем и начинаем перетаскивание
+                drag = QDrag(self)
+                drag.setMimeData(mime_data)
+                
+                # Создаем пиктограмму для перетаскивания
+                pixmap = QPixmap(100, 30)
+                pixmap.fill(Qt.transparent)
+                painter = QPainter(pixmap)
+                painter.setPen(QPen(Qt.black))
+                painter.drawText(pixmap.rect(), Qt.AlignCenter, f"{len(file_paths)} файл(ов)")
+                painter.end()
+                
+                drag.setPixmap(pixmap)
+                drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
+                
+                # Выполняем перетаскивание
+                drag.exec(Qt.CopyAction)
+                
+        except Exception as e:
+            logging.error(f"Ошибка при начале перетаскивания: {e}")
 
 class FilteredTable(QWidget):
     def __init__(self, label, settings_key, parent=None):
@@ -250,6 +295,10 @@ class FilteredTable(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Включаем поддержку перетаскивания элементов таблицы
+        self.table.setDragEnabled(True)
+        self.table.setDragDropMode(QTableWidget.DragDropMode.DragOnly)
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
@@ -293,7 +342,7 @@ class FilteredTable(QWidget):
         if dir_path:
             self.dir_path = dir_path
         self.update_path_label()  # 🏷️ Обновляем метку пути
-        self.apply_filter()
+        self.apply_filter()  # Применяем фильтр, который добавит файлы в таблицу с Qt.UserRole
 
     def load_from_dir(self, dir_path):
         exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -382,7 +431,13 @@ class FilteredTable(QWidget):
         for idx, name, path in filtered_files:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(name))
+            
+            # Создаем элемент с именем файла
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.UserRole, path)  # Сохраняем полный путь
+            name_item.setToolTip(path)  # Показываем полный путь при наведении
+            
+            self.table.setItem(row, 0, name_item)
             self.filtered.append(idx)
         
         self.show_preview()
@@ -1004,6 +1059,60 @@ class MainWindow(QMainWindow):
         left_col = QVBoxLayout()
         left_col.addWidget(self.grp_a_label)
         left_col.addWidget(self.grp_a)
+        
+        # 🚫 Таблица исключений для папки A
+        self.exclude_a_label = QLabel("🚫 Исключения A")
+        self.exclude_a_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.exclude_a_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                font-weight: bold;
+                color: #d32f2f;
+                padding: 4px;
+                background: #ffebee;
+                border-radius: 4px;
+                margin: 2px;
+            }
+        """)
+        self.exclude_a_table = QTableWidget()
+        self.exclude_a_table.setColumnCount(1)
+        self.exclude_a_table.setHorizontalHeaderLabels(["Исключенные файлы"])
+        self.exclude_a_table.setMaximumHeight(120)
+        self.exclude_a_table.setDragDropMode(QTableWidget.DragDropMode.DropOnly)
+        self.exclude_a_table.setAcceptDrops(True)
+        self.exclude_a_table.dropEvent = self.exclude_a_drop_event
+        self.exclude_a_table.dragEnterEvent = self.exclude_a_drag_enter_event
+        self.exclude_a_table.dragMoveEvent = self.exclude_a_drag_move_event
+        
+        left_col.addWidget(self.exclude_a_label)
+        left_col.addWidget(self.exclude_a_table)
+        
+        # 🔄 Кнопка возврата файлов из исключений A
+        self.restore_a_btn = QPushButton("↩️ Вернуть файлы")
+        self.restore_a_btn.setToolTip("Вернуть выбранные файлы из исключений")
+        self.restore_a_btn.setStyleSheet("""
+            QPushButton {
+                background: #4caf50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #388e3c;
+            }
+            QPushButton:disabled {
+                background: #bdbdbd;
+                color: #757575;
+            }
+        """)
+        self.restore_a_btn.clicked.connect(self.restore_excluded_files_a)
+        self.restore_a_btn.setEnabled(False)
+        
+        left_col.addWidget(self.restore_a_btn)
+        
         left_col_w = QWidget()
         left_col_w.setLayout(left_col)
         left_col_w.setMinimumWidth(120)
@@ -1029,6 +1138,60 @@ class MainWindow(QMainWindow):
         mid_col = QVBoxLayout()
         mid_col.addWidget(self.grp_b_label)
         mid_col.addWidget(self.grp_b)
+        
+        # 🚫 Таблица исключений для папки B
+        self.exclude_b_label = QLabel("🚫 Исключения B")
+        self.exclude_b_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.exclude_b_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                font-weight: bold;
+                color: #d32f2f;
+                padding: 4px;
+                background: #ffebee;
+                border-radius: 4px;
+                margin: 2px;
+            }
+        """)
+        self.exclude_b_table = QTableWidget()
+        self.exclude_b_table.setColumnCount(1)
+        self.exclude_b_table.setHorizontalHeaderLabels(["Исключенные файлы"])
+        self.exclude_b_table.setMaximumHeight(120)
+        self.exclude_b_table.setDragDropMode(QTableWidget.DragDropMode.DropOnly)
+        self.exclude_b_table.setAcceptDrops(True)
+        self.exclude_b_table.dropEvent = self.exclude_b_drop_event
+        self.exclude_b_table.dragEnterEvent = self.exclude_b_drag_enter_event
+        self.exclude_b_table.dragMoveEvent = self.exclude_b_drag_move_event
+        
+        mid_col.addWidget(self.exclude_b_label)
+        mid_col.addWidget(self.exclude_b_table)
+        
+        # 🔄 Кнопка возврата файлов из исключений B
+        self.restore_b_btn = QPushButton("↩️ Вернуть файлы")
+        self.restore_b_btn.setToolTip("Вернуть выбранные файлы из исключений")
+        self.restore_b_btn.setStyleSheet("""
+            QPushButton {
+                background: #4caf50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #388e3c;
+            }
+            QPushButton:disabled {
+                background: #bdbdbd;
+                color: #757575;
+            }
+        """)
+        self.restore_b_btn.clicked.connect(self.restore_excluded_files_b)
+        self.restore_b_btn.setEnabled(False)
+        
+        mid_col.addWidget(self.restore_b_btn)
+        
         mid_col_w = QWidget()
         mid_col_w.setLayout(mid_col)
         mid_col_w.setMinimumWidth(120)
@@ -1196,6 +1359,30 @@ class MainWindow(QMainWindow):
         result_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         print('result_col_w end')
         print('step 9')
+        
+        # 🎛️ Кнопка скрытия/показа панели выбора папок
+        self.toggle_folders_btn = QPushButton("👁️ Скрыть панели")
+        self.toggle_folders_btn.setToolTip("Скрыть/показа панели выбора папок для увеличения рабочего пространства (Ctrl+H)")
+        self.toggle_folders_btn.setStyleSheet("""
+            QPushButton {
+                background: #607d8b;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #455a64;
+            }
+        """)
+        self.toggle_folders_btn.clicked.connect(self.toggle_folders_panel)
+        
+        # Горячая клавиша Ctrl+H для скрытия/показа панелей
+        self.toggle_folders_shortcut = QShortcut(QKeySequence("Ctrl+H"), self)
+        self.toggle_folders_shortcut.activated.connect(self.toggle_folders_panel)
+        
         print('before splitter')
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         print('after splitter')
@@ -1262,24 +1449,26 @@ class MainWindow(QMainWindow):
         self.highlight_diff_btn.clicked.connect(self.highlight_differences)
         self.highlight_diff_btn.setEnabled(False)  # Включаем только когда overlay активен
         
-        # Кнопка "Тест позиционирования" (для отладки)
-        self.test_positioning_btn = QPushButton("🧪 Тест позиционирования")
-        self.test_positioning_btn.setToolTip("Тестирует точность размещения кругов подсветки")
-        self.test_positioning_btn.setStyleSheet("""
-            QPushButton {
-                background: #9c27b0;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background: #7b1fa2;
-            }
-        """)
-        self.test_positioning_btn.clicked.connect(self.test_positioning_accuracy)
+        # Кнопка отладки различий (УБРАНА)
+        # self.debug_diff_btn = QPushButton("🐛 Debug различия")
+        # self.debug_diff_btn.setToolTip("Показать отладочную информацию о различиях")
+        # self.debug_diff_btn.setStyleSheet("""
+        #     QPushButton {
+        #         background: #ff9800;
+        #         color: white;
+        #         border: none;
+        #         border-radius: 6px;
+        #         padding: 6px 12px;
+        #         font-weight: bold;
+        #     }
+        #     QPushButton:hover {
+        #         background: #f57c00;
+        #     }
+        # """)
+        # self.debug_diff_btn.clicked.connect(self.debug_differences)
+        # self.debug_diff_btn.setEnabled(False)  # Включаем только когда overlay активен
+        
+
         
         self.prev_btn = QPushButton("◀")
         self.prev_btn.setFixedWidth(32)
@@ -1319,7 +1508,7 @@ class MainWindow(QMainWindow):
         self.slider_control.addWidget(self.overlay_chk)
         self.slider_control.addWidget(self.fit_to_window_btn)
         self.slider_control.addWidget(self.highlight_diff_btn)
-        self.slider_control.addWidget(self.test_positioning_btn)
+        # self.slider_control.addWidget(self.debug_diff_btn)  # УБРАНО
         self.slider_control.addStretch(1)
         self.slider_control.addWidget(self.prev_btn)
         self.slider_control.addWidget(self.next_btn)
@@ -1408,13 +1597,34 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(settings_tab, "Настройки сравнения")
         print('after add settings_tab')
         main_tab = QWidget()
-        main_tab.setLayout(QHBoxLayout())
-        main_tab.layout().addWidget(self.main_splitter)
+        main_layout = QVBoxLayout()
+        
+        # Добавляем кнопку скрытия/показа панелей в верхнюю часть
+        top_controls = QHBoxLayout()
+        top_controls.addWidget(self.toggle_folders_btn)
+        top_controls.addStretch(1)
+        main_layout.addLayout(top_controls)
+        
+        # Добавляем основной splitter
+        main_layout.addWidget(self.main_splitter)
+        main_tab.setLayout(main_layout)
         print('after main_tab layout')
         self.tabs.addTab(main_tab, "Сравнение и Слайдер")
         print('after add main_tab')
         self.setCentralWidget(self.tabs)
         print('after setCentralWidget')
+        
+        # --- 🎨 Устанавливаем иконку программы ---
+        try:
+            icon_path = "imgdiff_icon.ico"
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+                print("✅ Иконка программы установлена")
+            else:
+                print("⚠️ Файл иконки не найден: imgdiff_icon.ico")
+        except Exception as e:
+            print(f"⚠️ Не удалось установить иконку: {e}")
+        
         # --- 🎨 Современный стиль ---
         self.setStyleSheet('''
             QWidget { background: #f7f7fa; }
@@ -1439,6 +1649,12 @@ class MainWindow(QMainWindow):
         self.grp_b.table.itemSelectionChanged.connect(self.update_slider)
         self.grp_a.table.itemDoubleClicked.connect(self.open_table_image)
         self.grp_b.table.itemDoubleClicked.connect(self.open_table_image)
+        
+        # Включаем контекстное меню для таблиц
+        self.grp_a.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.grp_b.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.grp_a.table.customContextMenuRequested.connect(self.show_context_menu_a)
+        self.grp_b.table.customContextMenuRequested.connect(self.show_context_menu_b)
         self.result_table.itemSelectionChanged.connect(self.on_result_selection_changed)
         
         # Подключаем обновление состояния кнопки сохранения
@@ -1446,6 +1662,10 @@ class MainWindow(QMainWindow):
         self.radio_sel.toggled.connect(self.update_save_button_state)
         self.grp_a.table.itemSelectionChanged.connect(self.update_save_button_state)
         self.grp_b.table.itemSelectionChanged.connect(self.update_save_button_state)
+        
+        # Подключаем события выбора в таблицах исключений
+        self.exclude_a_table.itemSelectionChanged.connect(self.update_restore_buttons_state)
+        self.exclude_b_table.itemSelectionChanged.connect(self.update_restore_buttons_state)
         
         print('after connections')
         self.restore_state()
@@ -1821,18 +2041,22 @@ class MainWindow(QMainWindow):
 
     def open_table_image(self, item):
         """Открыть изображение из таблицы A или B в стандартном просмотрщике"""
-        if item is not None:
-            row = item.row()
-            # Определяем из какой таблицы был клик
-            sender = self.sender()
-            if sender == self.grp_a.table:
-                if row < len(self.grp_a.filtered):
-                    file_path = self.grp_a.files[self.grp_a.filtered[row]][1]
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
-            elif sender == self.grp_b.table:
-                if row < len(self.grp_b.filtered):
-                    file_path = self.grp_b.files[self.grp_b.filtered[row]][1]
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+        try:
+            if item is not None and hasattr(item, 'row'):
+                row = item.row()
+                # Определяем из какой таблицы был клик
+                sender = self.sender()
+                if sender == self.grp_a.table:
+                    if row < len(self.grp_a.filtered):
+                        file_path = self.grp_a.files[self.grp_a.filtered[row]][1]
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+                elif sender == self.grp_b.table:
+                    if row < len(self.grp_b.filtered):
+                        file_path = self.grp_b.files[self.grp_b.filtered[row]][1]
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+        except Exception as e:
+            logging.error(f"Ошибка при открытии изображения: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть изображение: {str(e)}")
 
     def show_result_image_from_selection(self):
         """Оптимизированный метод загрузки превью результата с кэшированием"""
@@ -2056,6 +2280,10 @@ class MainWindow(QMainWindow):
         # Сохраняем размеры сплиттеров
         self.settings.setValue("splitter_sizes", self.splitter.sizes())
         self.settings.setValue("main_splitter_sizes", self.main_splitter.sizes())
+        
+        # Сохраняем списки исключений
+        self.settings.setValue("excluded_files_a", self.get_excluded_files_a())
+        self.settings.setValue("excluded_files_b", self.get_excluded_files_b())
 
     def restore_state(self):
         self.grp_a.restore_state(self.settings)
@@ -2139,6 +2367,9 @@ class MainWindow(QMainWindow):
         
         # Обновляем состояние кнопок после восстановления состояния
         self.update_save_button_state()
+        
+        # Восстанавливаем списки исключений
+        self.restore_excluded_files_lists()
 
     def update_result_table(self):
         # Показываем все файлы из папки B
@@ -2374,6 +2605,7 @@ class MainWindow(QMainWindow):
             logging.error(f"Ошибка при запуске подсветки различий: {e}")
             self.statusBar().showMessage("Ошибка при запуске подсветки", 3000)
             self.highlight_diff_btn.setEnabled(True)  # Разблокируем кнопку
+            # self.debug_diff_btn.setEnabled(True)  # Разблокируем кнопку отладки (УБРАНО)
     
     def create_difference_highlight_animation(self):
         """Создает простую подсветку различий прозрачными кругами"""
@@ -2403,8 +2635,9 @@ class MainWindow(QMainWindow):
                 # Расчет процента на основе количества найденных различий
                 total_area = img_a.width() * img_a.height()
                 
-                # Каждый центр различий представляет область примерно 120x120 пикселей
-                circle_area = 120 * 120
+                # Каждый центр различий представляет область примерно 80x80 пикселей
+                # Оптимальный размер для точного расчета
+                circle_area = 80 * 80
                 estimated_diff_pixels = len(diff_centers) * circle_area
                 
                 diff_percentage = min((estimated_diff_pixels / total_area) * 100, 100)
@@ -2414,7 +2647,7 @@ class MainWindow(QMainWindow):
                 self.diff_percentage_label.setText(f"Различие: {diff_percentage:.1f}% (Сходство: {similarity_percentage:.1f}%)")
                 
                 # Показываем дополнительную информацию
-                self.statusBar().showMessage(f"Найдено {len(diff_centers)} областей различий (зеленый цвет)", 2000)
+                self.statusBar().showMessage(f"Найдено {len(diff_centers)} областей различий", 2000)
                 
                 # Логируем результат
                 logging.info(f"Процент различия: {diff_percentage:.1f}%, центров: {len(diff_centers)}")
@@ -2436,23 +2669,26 @@ class MainWindow(QMainWindow):
         finally:
             # Разблокируем кнопку подсветки в любом случае
             self.highlight_diff_btn.setEnabled(True)
+            # self.debug_diff_btn.setEnabled(True)  # УБРАНО
     
     def find_differences_simple(self, img_a, img_b):
-        """Простой и надежный поиск различий - сравниваем пиксели между изображениями"""
+        """ПРОСТОЙ и стабильный поиск различий"""
         try:
             width = img_a.width()
             height = img_a.height()
-            centers = []
             
             logging.info(f"Ищем различия между изображениями A и B")
             logging.info(f"Размер изображения: {width}x{height}")
             
-            # ИСПРАВЛЕНИЕ: Теперь ищем реальные различия между изображениями
-            # Сравниваем пиксели img_a и img_b в каждой позиции
-            step = 10  # Шаг для производительности
+            # УСИЛЕННЫЙ алгоритм поиска различий
+            step = 5  # Меньший шаг = больше различий, но медленнее
+            color_diff_threshold = 20  # Более низкий порог = более чувствительно
             
             # Список всех найденных различий
             all_differences = []
+            
+            # Счетчик для логирования
+            diff_count = 0
             
             for y in range(0, height, step):
                 for x in range(0, width, step):
@@ -2468,31 +2704,60 @@ class MainWindow(QMainWindow):
                             abs(color_a.blue() - color_b.blue())
                         ) / 3  # Среднее отклонение по RGB
                         
-                        # Если цвета отличаются значительно (порог 30)
-                        if color_diff > 30:
-                            all_differences.append((x, y, color_diff, f"разница={color_diff:.1f}"))
+                        # Более чувствительный порог для поиска различий
+                        if color_diff > color_diff_threshold:
+                            all_differences.append((x, y, color_diff))
+                            diff_count += 1
                             
-                            # Логируем найденное различие
-                            logging.info(f"🎯 Найдено различие в ({x}, {y}): A={color_a.name()}, B={color_b.name()}, разница={color_diff:.1f}")
+                            # Логируем только первые несколько различий
+                            if diff_count <= 5:
+                                logging.info(f"🎯 Найдено различие в ({x}, {y}): разница={color_diff:.1f}")
                             
-                            # Ограничиваем количество для производительности
-                            if len(all_differences) >= 200:
+                            # Увеличенный лимит для большего количества различий
+                            if len(all_differences) >= 500:  # Увеличиваем лимит для большего покрытия
                                 break
                     except Exception as e:
                         # Пропускаем проблемные пиксели
                         continue
                 
-                if len(all_differences) >= 200:
+                if len(all_differences) >= 500:
                     break
             
             logging.info(f"Найдено различий: {len(all_differences)}")
             
-            # Группируем близкие различия в центры
-            centers = self.group_close_differences(all_differences)
+            # УЛУЧШЕННАЯ группировка различий
+            centers = []
             
-            # Если не нашли различий, возвращаем пустой список
-            if not centers:
-                logging.info("Различия не найдены - изображения идентичны")
+            # Сортируем различия по силе различия (большие различия сначала)
+            all_differences.sort(key=lambda x: x[2], reverse=True)
+            
+            # Берем различия с наибольшей разницей
+            for i, (x, y, color_diff) in enumerate(all_differences):
+                # Проверяем, не слишком ли близко к уже выбранным центрам
+                too_close = False
+                for center_x, center_y in centers:
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if distance < 80:  # Минимальное расстояние между центрами
+                        too_close = True
+                        break
+                
+                if not too_close:
+                    centers.append((x, y))
+                    if len(centers) >= 20:  # Увеличиваем количество кружочков
+                        break
+            
+            # ДОПОЛНИТЕЛЬНАЯ ОТЛАДКА: Проверяем, какие координаты в видимой области
+            logging.info("🔍 Анализ координат различий:")
+            visible_count = 0
+            for x, y in centers:
+                # Проверяем, находится ли координата в пределах слайдера
+                if 0 <= x <= 1779 and 0 <= y <= 1308:  # Примерные размеры слайдера
+                    visible_count += 1
+                    logging.info(f"  ✅ ({x}, {y}) - в видимой области")
+                else:
+                    logging.info(f"  ❌ ({x}, {y}) - вне видимой области")
+            
+            logging.info(f"📊 Из {len(centers)} центров различий в видимой области: {visible_count}")
             
             logging.info(f"Найдено центров различий: {len(centers)}")
             return centers
@@ -2503,20 +2768,20 @@ class MainWindow(QMainWindow):
             return []
     
     def group_close_differences(self, differences):
-        """Группирует близкие различия в центры для избежания перекрытия кругов"""
+        """Улучшенная группировка различий с правильным алгоритмом"""
         try:
             if not differences:
                 return []
             
-            # ИСПРАВЛЕНИЕ: Новая структура данных: (x, y, color_diff, desc)
-            # Сортируем различия по отклонению цвета (лучшие совпадения сначала)
-            differences.sort(key=lambda x: x[2])
+            # Структура данных: (x, y, color_diff)
+            # Сортируем различия по отклонению цвета (большие различия сначала)
+            differences.sort(key=lambda x: x[2], reverse=True)
             
-            # Группируем близкие координаты
+            # УЛУЧШЕННАЯ группировка различий
             groups = []
-            min_distance = 150  # Минимальное расстояние между центрами групп
+            min_distance = 80  # Уменьшаем расстояние для более плотного покрытия
             
-            for x, y, color_diff, desc in differences:
+            for x, y, color_diff in differences:
                 # Проверяем, можно ли добавить к существующей группе
                 added_to_group = False
                 
@@ -2541,8 +2806,8 @@ class MainWindow(QMainWindow):
                     # Создаем новую группу
                     groups.append([x, y, 1])
                 
-                # Ограничиваем количество групп
-                if len(groups) >= 12:  # Увеличиваем лимит для лучшего покрытия
+                # Увеличиваем лимит групп для лучшего покрытия
+                if len(groups) >= 25:  # Больше групп = больше кружочков
                     break
             
             # Преобразуем группы в центры
@@ -2556,7 +2821,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Ошибка при группировке различий: {e}")
             # Fallback: возвращаем первые различия без группировки
-            return [(x, y) for x, y, _, _ in differences[:8]]
+            return [(x, y) for x, y, _ in differences[:10]]
     
     def find_difference_centers(self, diff_mask):
         """Находит центры областей различий для подсветки (устаревший метод)"""
@@ -2567,6 +2832,57 @@ class MainWindow(QMainWindow):
         """Запускает анимацию подсветки различий (устаревший метод)"""
         # Оставляем для совместимости, но используем простую версию
         self.create_simple_highlight_circles(centers)
+    
+    def debug_differences(self):
+        """Отладочная функция для анализа различий"""
+        try:
+            # self.debug_diff_btn.setEnabled(False)  # Блокируем кнопку (УБРАНО)
+            
+            # Получаем изображения
+            img_a = self.slider_reveal.pixmap_a.toImage()
+            img_b = self.slider_reveal.pixmap_b.toImage()
+            
+            if img_a.isNull() or img_b.isNull():
+                self.statusBar().showMessage("Изображения не загружены", 3000)
+                return
+            
+            # Показываем информацию о размерах
+            size_info = f"Размеры: A={img_a.width()}x{img_a.height()}, B={img_b.width()}x{img_b.height()}"
+            
+            # Ищем различия
+            diff_centers = self.find_differences_simple(img_a, img_b)
+            
+            # Создаем детальный отчет
+            report = f"""
+🔍 ОТЧЕТ О РАЗЛИЧИЯХ:
+
+{size_info}
+
+📊 Найдено различий: {len(diff_centers)}
+🎯 Координаты центров различий:
+"""
+            
+            for i, (x, y) in enumerate(diff_centers[:10]):  # Показываем первые 10
+                report += f"  {i+1}. ({x}, {y})\n"
+            
+            if len(diff_centers) > 10:
+                report += f"  ... и еще {len(diff_centers) - 10} различий\n"
+            
+            # Показываем отчет в диалоге
+            msg = QMessageBox()
+            msg.setWindowTitle("🐛 Отладка различий")
+            msg.setText(report)
+            msg.setDetailedText(f"Полный список координат:\n" + 
+                              "\n".join([f"({x}, {y})" for x, y in diff_centers]))
+            msg.exec()
+            
+            self.statusBar().showMessage(f"Отладка завершена. Найдено {len(diff_centers)} различий", 3000)
+            
+        except Exception as e:
+            logging.error(f"Ошибка при отладке различий: {e}")
+            self.statusBar().showMessage(f"Ошибка отладки: {str(e)}", 3000)
+        finally:
+            pass  # self.debug_diff_btn.setEnabled(True)  # УБРАНО
     
     def create_simple_highlight_circles(self, centers):
         """Создает простые круги подсветки без анимации"""
@@ -2586,87 +2902,326 @@ class MainWindow(QMainWindow):
             highlight_color = self.color
             color_name = highlight_color.name()
             
+            # Логируем используемый цвет для отладки
+            logging.info(f"🎨 Цвет подсветки: {color_name} (RGB: {highlight_color.red()}, {highlight_color.green()}, {highlight_color.blue()})")
+            
+            # ПРОВЕРЯЕМ: Если цвет не зеленый, принудительно используем зеленый для подсветки
+            if highlight_color.green() < 200 or highlight_color.red() > 100 or highlight_color.blue() > 100:
+                logging.warning(f"⚠️ Цвет подсветки не зеленый: {color_name}, принудительно используем зеленый")
+                highlight_color = QColor(0, 255, 0)  # Принудительно зеленый
+                color_name = highlight_color.name()
+                logging.info(f"🎨 Установлен принудительный зеленый цвет: {color_name}")
+            
             # Получаем размеры изображений для проверки координат
             img_a = self.slider_reveal.pixmap_a.toImage()
             img_b = self.slider_reveal.pixmap_b.toImage()
             
             logging.info(f"Размеры изображений: A={img_a.width()}x{img_a.height()}, B={img_b.width()}x{img_b.height()}")
+            logging.info(f"Размер слайдера: {self.slider_reveal.width()}x{self.slider_reveal.height()}")
             
-            for center_x, center_y in centers:
-                # Создаем круг подсветки с цветом из настроек
-                # Увеличиваем зону зеленого цвета в 2-3 раза, как просил пользователь
-                circle = QLabel(self.slider_reveal)
-                circle.setFixedSize(120, 120)  # Увеличиваем размер с 80 до 120 (в 1.5 раза)
+            circles_created = 0
+            circles_shown = 0
+            
+            for i, (center_x, center_y) in enumerate(centers):
+                logging.info(f"🔍 Обрабатываем центр {i+1}/{len(centers)}: ({center_x}, {center_y})")
+                # Создаем круг подсветки как дочерний элемент ГЛАВНОГО ОКНА для лучшего Z-order
+                circle = QLabel(self)
+                circle.setFixedSize(120, 120)  # УВЕЛИЧИВАЕМ размер для лучшей видимости
                 
-                # Используем цвет из настроек для подсветки с большей прозрачностью
+                circles_created += 1
+                
+                # УПРОЩАЕМ стили - делаем кружочки ПОЛУПРОЗРАЧНЫМИ (50%)
                 circle.setStyleSheet(f"""
                     QLabel {{
-                        background: radial-gradient(circle, {color_name}60 0%, {color_name}40 30%, {color_name}20 60%, {color_name}10 100%);
-                        border: 4px solid {color_name}90;
+                        background: rgba(0, 255, 0, 0.5);
+                        border: 10px solid rgba(0, 0, 0, 0.5);
                         border-radius: 60px;
                     }}
                 """)
                 
-                # Позиционируем круг с учетом масштаба и смещения слайдера
+                # Принудительно устанавливаем атрибуты для отображения
+                circle.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+                circle.setAttribute(Qt.WA_NoSystemBackground, False)
+                circle.raise_()  # Поднимаем наверх
+                
+                # ПРОСТОЕ позиционирование круга
                 try:
-                    # Получаем текущие параметры слайдера
+                    # ПРАВИЛЬНОЕ позиционирование круга с учетом масштаба и смещения
+                    # Получаем параметры слайдера
                     scale = getattr(self.slider_reveal, 'scale', 1.0)
                     offset_x = getattr(self.slider_reveal, 'offset', QPoint(0, 0)).x()
                     offset_y = getattr(self.slider_reveal, 'offset', QPoint(0, 0)).y()
                     
-                    # Логируем параметры позиционирования
-                    logging.info(f"Параметры слайдера: scale={scale}, offset=({offset_x}, {offset_y})")
-                    logging.info(f"Размер слайдера: {self.slider_reveal.width()}x{self.slider_reveal.height()}")
-                    
-                    # Вычисляем позицию круга с учетом масштаба и смещения
-                    # center_x и center_y - это координаты в оригинальном изображении
-                    # Нужно преобразовать их в координаты слайдера
+                    # Преобразуем координаты из оригинального изображения в координаты слайдера
+                    # center_x и center_y - это координаты в оригинальном изображении (9933x7017)
+                    # Нужно преобразовать их в координаты слайдера (1779x1308)
                     pos_x = int(center_x * scale + offset_x - 60)  # Центрируем круг (120/2)
                     pos_y = int(center_y * scale + offset_y - 60)
                     
-                    # Проверяем, что круг находится в видимой области слайдера
+                    logging.info(f"📍 Позиция круга {i+1}: оригинал=({center_x}, {center_y}), слайдер=({pos_x}, {pos_y})")
+                    logging.info(f"   Масштаб: {scale}, Смещение: ({offset_x}, {offset_y})")
+                    
+                    # Проверяем, что круг находится в пределах слайдера
                     slider_width = self.slider_reveal.width()
                     slider_height = self.slider_reveal.height()
                     
-                    # Расширяем область видимости для частично видимых кругов
                     if (pos_x >= -120 and pos_x <= slider_width + 120 and 
                         pos_y >= -120 and pos_y <= slider_height + 120):
                         
-                        # Проверяем, что центр круга находится в пределах изображения
-                        if (center_x >= 0 and center_x < img_a.width() and 
-                            center_y >= 0 and center_y < img_a.height()):
-                            
-                            circle.move(pos_x, pos_y)
-                            circle.show()
-                            self.highlight_circles.append(circle)
-                            
-                            # Подробное логирование создания круга
-                            logging.info(f"✅ Создан круг подсветки:")
-                            logging.info(f"   Оригинальные координаты: ({center_x}, {center_y})")
-                            logging.info(f"   Позиция в слайдере: ({pos_x}, {pos_y})")
-                            logging.info(f"   Масштаб: {scale}, Смещение: ({offset_x}, {offset_y})")
-                            logging.info(f"   Размер изображения: {img_a.width()}x{img_a.height()}")
-                        else:
-                            logging.warning(f"❌ Координаты ({center_x}, {center_y}) вне изображения {img_a.width()}x{img_a.height()}")
-                            circle.deleteLater()
+                        # ПРЕОБРАЗУЕМ координаты слайдера в координаты главного окна
+                        slider_pos = self.slider_reveal.mapToGlobal(QPoint(0, 0))
+                        main_pos = self.mapFromGlobal(slider_pos)
+                        
+                        # Финальные координаты в главном окне
+                        final_x = main_pos.x() + pos_x
+                        final_y = main_pos.y() + pos_y
+                        
+                        circle.move(final_x, final_y)
+                        circle.show()
+                        
+                        # ПРИНУДИТЕЛЬНО поднимаем на самый верх несколько раз
+                        for _ in range(10):
+                            circle.raise_()
+                        
+                        circle.repaint()
+                        circle.update()
+                        
+                        self.highlight_circles.append(circle)
+                        circles_shown += 1
+                        
+                        # Логируем создание круга
+                        logging.info(f"✅ Круг {i+1} создан и показан в слайдере=({pos_x}, {pos_y}), главное окно=({final_x}, {final_y})")
+                        
+                        # Принудительно обновляем главное окно
+                        self.repaint()
+                        self.update()
                     else:
-                        logging.warning(f"❌ Круг вне видимой области слайдера: ({pos_x}, {pos_y}) vs {slider_width}x{slider_height}")
-                        circle.deleteLater()
+                        logging.warning(f"❌ Круг вне области слайдера: ({pos_x}, {pos_y}) vs {slider_width}x{slider_height}")
+                        
+                        # АЛЬТЕРНАТИВА: Пытаемся найти ближайшую видимую позицию
+                        logging.info(f"🔄 Пытаемся найти ближайшую видимую позицию для круга {i+1}")
+                        
+                        # Ограничиваем координаты пределами слайдера
+                        adjusted_x = max(60, min(pos_x, slider_width - 60))
+                        adjusted_y = max(60, min(pos_y, slider_height - 60))
+                        
+                        # Проверяем, что скорректированная позиция отличается от исходной
+                        if abs(adjusted_x - pos_x) < slider_width and abs(adjusted_y - pos_y) < slider_height:
+                            # ПРЕОБРАЗУЕМ координаты слайдера в координаты главного окна
+                            slider_pos = self.slider_reveal.mapToGlobal(QPoint(0, 0))
+                            main_pos = self.mapFromGlobal(slider_pos)
+                            
+                            # Финальные координаты в главном окне
+                            final_x = main_pos.x() + adjusted_x
+                            final_y = main_pos.y() + adjusted_y
+                            
+                            circle.move(final_x, final_y)
+                            circle.show()
+                            
+                            # ПРИНУДИТЕЛЬНО поднимаем на самый верх несколько раз
+                            for _ in range(10):
+                                circle.raise_()
+                            
+                            circle.repaint()
+                            circle.update()
+                            
+                            self.highlight_circles.append(circle)
+                            circles_shown += 1
+                            
+                            logging.info(f"✅ Круг {i+1} скорректирован и показан в слайдере=({adjusted_x}, {adjusted_y}), главное окно=({final_x}, {final_y})")
+                            
+                            # Принудительно обновляем главное окно
+                            self.repaint()
+                            self.update()
+                        else:
+                            logging.warning(f"❌ Не удалось скорректировать позицию для круга {i+1}")
+                            circle.deleteLater()
                         
                 except Exception as e:
-                    # Если не удалось позиционировать, пропускаем этот круг
                     logging.error(f"❌ Ошибка позиционирования круга: {e}")
                     circle.deleteLater()
                     continue
+            
+            logging.info(f"📊 ИТОГО: создано {circles_created} кружочков, показано {circles_shown}")
+            
+            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Проверяем, что кружочки действительно в списке
+            logging.info(f"🔍 Проверка списка кружочков:")
+            logging.info(f"   Длина списка: {len(self.highlight_circles)}")
+            logging.info(f"   Тип элементов: {[type(circle) for circle in self.highlight_circles]}")
+            logging.info(f"   Видимость: {[circle.isVisible() for circle in self.highlight_circles]}")
+            logging.info(f"   Размеры: {[f'{circle.width()}x{circle.height()}' for circle in self.highlight_circles]}")
+            
+                                        # ПРОСТОЙ ТЕСТ: УБРАН - больше не нужен
+            # logging.info("🧪 Создаем ПРОСТОЙ тестовый кружочек прямо в слайдере")
+            # simple_circle = QLabel(self.slider_reveal)
+            # simple_circle.setFixedSize(100, 100)
+            # simple_circle.setStyleSheet("""
+            #     QLabel {
+            #         background: rgba(255, 0, 0, 0.5);
+            #         border: 5px solid rgba(0, 0, 0, 0.5);
+            #         border-radius: 50px;
+            #     }
+            # """)
+            
+            # # Размещаем в левом верхнем углу слайдера
+            # simple_circle.move(50, 50)
+            # simple_circle.show()
+            # simple_circle.raise_()
+            
+            # self.highlight_circles.append(simple_circle)
+            # logging.info("🧪 ПРОСТОЙ красный кружочек создан в (50, 50) слайдера")
+            
+            # КОММЕНТАРИЙ: Тестовый кружочек убран, так как функция подсветки работает стабильно
+            
+            # ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ: Обновляем весь слайдер после создания всех кружочков
+            if self.highlight_circles:
+                logging.info("🔄 Принудительно обновляем весь слайдер")
+                self.slider_reveal.repaint()
+                self.slider_reveal.update()
+                
+                # Также обновляем родительский виджет
+                if hasattr(self.slider_reveal, 'parent'):
+                    parent = self.slider_reveal.parent()
+                    if parent:
+                        parent.repaint()
+                        parent.update()
+                        logging.info("🔄 Обновлен родительский виджет")
+                
+                # ПРОВЕРКА: Проверяем, что кружочки различий действительно видны
+                logging.info("🔍 ПРОВЕРКА видимости кружочков различий:")
+                for i, circle in enumerate(self.highlight_circles):
+                    if i < 10:  # Только кружочки различий (первые 10)
+                        is_visible = circle.isVisible()
+                        geometry = circle.geometry()
+                        logging.info(f"   Кружочек {i+1}: видимый={is_visible}, геометрия={geometry}")
+                        
+                        # Принудительно показываем каждый кружочек различий
+                        if not is_visible:
+                            circle.show()
+                            logging.info(f"   Кружочек {i+1} принудительно показан")
+            
+            # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Принудительно поднимаем ВСЕ кружочки различий наверх
+            logging.info("🚨 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Поднимаем все кружочки различий наверх")
+            for i, circle in enumerate(self.highlight_circles):
+                # Поднимаем каждый кружочек наверх 10 раз
+                for _ in range(10):
+                    circle.raise_()
+                circle.repaint()
+                circle.update()
+                logging.info(f"🚨 Кружочек {i+1} принудительно поднят наверх")
             
             if self.highlight_circles:
                 # Показываем уведомление в статусной строке
                 self.statusBar().showMessage(f"Подсвечено {len(self.highlight_circles)} областей различий", 2000)
                 
+                # ТЕСТ: ОГРОМНЫЙ красный кружочек УБРАН - больше не нужен
+                # logging.info("🧪 Создаем ОГРОМНЫЙ тестовый кружочек для проверки видимости")
+                # huge_circle = QLabel(self.slider_reveal)
+                # huge_circle.setFixedSize(200, 200)  # Огромный размер
+                # huge_circle.setStyleSheet("""
+                #     QLabel {
+                #         background: rgba(255, 0, 0, 0.5);
+                #         border: 10px solid rgba(0, 0, 0, 0.5);
+                #         border-radius: 100px;
+                #     }
+                # """)
+                
+                # # Размещаем в правом верхнем углу слайдера
+                # huge_pos_x = self.slider_reveal.width() - 220
+                # huge_pos_y = 20
+                # huge_circle.move(huge_pos_x, huge_pos_y)
+                # huge_circle.show()
+                
+                # # ПРИНУДИТЕЛЬНО поднимаем на самый верх несколько раз
+                # for _ in range(5):
+                #     huge_circle.raise_()
+                
+                # huge_circle.repaint()
+                # huge_circle.update()
+                
+                # self.highlight_circles.append(huge_circle)
+                # logging.info(f"🧪 ОГРОМНЫЙ красный кружочек создан в ({huge_pos_x}, {huge_pos_y})")
+                
+                # ДОПОЛНИТЕЛЬНЫЙ ТЕСТ: Зеленый кружочек в центре УБРАН - больше не нужен
+                # logging.info("🧪 Создаем ДОПОЛНИТЕЛЬНЫЙ зеленый кружочек в центре слайдера")
+                # center_circle = QLabel(self.slider_reveal)
+                # center_circle.setFixedSize(150, 150)  # Средний размер
+                # center_circle.setStyleSheet("""
+                #     QLabel {
+                #         background: rgba(0, 255, 0, 0.5);
+                #         border: 8px solid rgba(0, 0, 0, 0.5);
+                #         border-radius: 75px;
+                #     }
+                # """)
+                
+                # # Размещаем в центре слайдера
+                # center_pos_x = (self.slider_reveal.width() - 150) // 2
+                # center_pos_y = (self.slider_reveal.height() - 150) // 2
+                # center_circle.move(center_pos_x, center_pos_y)
+                # center_circle.show()
+                
+                # # ПРИНУДИТЕЛЬНО поднимаем на самый верх несколько раз
+                # for _ in range(10):
+                #     center_circle.raise_()
+                
+                # center_circle.repaint()
+                # center_circle.update()
+                
+                # self.highlight_circles.append(center_circle)
+                # logging.info(f"🧪 ДОПОЛНИТЕЛЬНЫЙ зеленый кружочек создан в центре ({center_pos_x}, {center_pos_y})")
+                
+                # ФИНАЛЬНОЕ ОБНОВЛЕНИЕ: Принудительно обновляем весь интерфейс
+                logging.info("🚨 ФИНАЛЬНОЕ ОБНОВЛЕНИЕ: Принудительно обновляем весь интерфейс")
+                self.slider_reveal.repaint()
+                self.slider_reveal.update()
+                self.repaint()
+                self.update()
+                
+                # Принудительно обновляем главное окно несколько раз
+                for _ in range(5):
+                    self.repaint()
+                    self.update()
+                    QApplication.processEvents()
+                
+                # Принудительно обновляем все дочерние виджеты
+                for child in self.slider_reveal.findChildren(QLabel):
+                    if child in self.highlight_circles:
+                        child.raise_()
+                        child.repaint()
+                        child.update()
+                        logging.info(f"🚨 Дочерний виджет {child} принудительно обновлен")
+                
+                # Принудительно обрабатываем события Qt
+                QApplication.processEvents()
+                
                 # Таймер для автоматического удаления кругов через 3 секунды
                 QTimer.singleShot(3000, self.remove_highlight_circles)
             else:
                 self.statusBar().showMessage("Не удалось создать круги подсветки", 2000)
+                
+                # ТЕСТ: Создаем один кружочек в центре для проверки
+                logging.info("🧪 Создаем тестовый кружочек в центре слайдера")
+                test_circle = QLabel(self.slider_reveal)
+                test_circle.setFixedSize(80, 80)
+                test_circle.setStyleSheet("""
+                    QLabel {
+                        background: radial-gradient(circle, #ff000080 0%, #ff000060 30%, #ff000040 60%, #ff000020 100%);
+                        border: 4px solid #ff0000;
+                        border-radius: 40px;
+                    }
+                """)
+                
+                # Размещаем в центре слайдера
+                center_x = self.slider_reveal.width() // 2 - 40
+                center_y = self.slider_reveal.height() // 2 - 40
+                test_circle.move(center_x, center_y)
+                test_circle.show()
+                
+                self.highlight_circles = [test_circle]
+                logging.info(f"🧪 Тестовый кружочек создан в центре ({center_x}, {center_y})")
+                
+                # Удаляем через 5 секунд
+                QTimer.singleShot(5000, self.remove_highlight_circles)
                 
         except Exception as e:
             # Обработка ошибок для предотвращения зависания
@@ -2694,25 +3249,34 @@ class MainWindow(QMainWindow):
             # Обработка ошибок для предотвращения зависания
             logging.error(f"Ошибка при удалении кругов подсветки: {e}")
     
-    def test_positioning_accuracy(self):
-        """Тестирует точность позиционирования кругов подсветки"""
+
+    
+    def toggle_folders_panel(self):
+        """Скрывает/показывает панели выбора папок для увеличения рабочего пространства"""
         try:
-            # Создаем тестовые круги в известных позициях
-            test_centers = [
-                (100, 100),   # Левый верхний угол
-                (300, 200),   # Середина
-                (500, 300),   # Правый нижний угол
-            ]
+            # Переключаем видимость панелей
+            is_visible = self.splitter.isVisible()
             
-            logging.info("🧪 Начинаем тест точности позиционирования")
-            self.create_simple_highlight_circles(test_centers)
-            
-            # Показываем результат теста
-            self.statusBar().showMessage("Тест позиционирования завершен - проверьте логи", 3000)
-            
+            if is_visible:
+                # Скрываем панели
+                self.splitter.setVisible(False)
+                self.toggle_folders_btn.setText("👁️ Показать панели")
+                self.toggle_folders_btn.setToolTip("Показать панели выбора папок (Ctrl+H)")
+                # Увеличиваем размер слайдера
+                self.main_splitter.setSizes([0, 1000])
+                self.statusBar().showMessage("Панели скрыты - больше места для работы с изображениями", 2000)
+            else:
+                # Показываем панели
+                self.splitter.setVisible(True)
+                self.toggle_folders_btn.setText("👁️ Скрыть панели")
+                self.toggle_folders_btn.setToolTip("Скрыть панели выбора папок для увеличения рабочего пространства (Ctrl+H)")
+                # Восстанавливаем размеры
+                self.main_splitter.setSizes([540, 900])
+                self.statusBar().showMessage("Панели показаны", 2000)
+                
         except Exception as e:
-            logging.error(f"Ошибка при тестировании позиционирования: {e}")
-            self.statusBar().showMessage(f"Ошибка теста: {str(e)}", 3000)
+            logging.error(f"Ошибка при переключении панелей: {e}")
+            self.statusBar().showMessage(f"Ошибка: {str(e)}", 3000)
     
     def on_alignment_changed(self, offset_x: int, offset_y: int):
         """Обработчик изменения смещения изображений (временно отключен)"""
@@ -2764,6 +3328,547 @@ class MainWindow(QMainWindow):
             self.slider_reveal.setVisible(False)
             self.save_overlay_btn.setEnabled(False)
             self.highlight_diff_btn.setEnabled(False)
+
+
+    # --- 🚫 Методы для работы с исключениями ---
+    
+    def exclude_a_drag_enter_event(self, event):
+        """Обработчик входа в зону перетаскивания для исключений A"""
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+    
+    def exclude_a_drag_move_event(self, event):
+        """Обработчик движения перетаскивания для исключений A"""
+        event.acceptProposedAction()
+    
+    def exclude_a_drop_event(self, event):
+        """Обработчик сброса файлов в исключения A"""
+        try:
+            mime_data = event.mimeData()
+            if mime_data.hasUrls():
+                urls = mime_data.urls()
+                for url in urls:
+                    file_path = url.toLocalFile()
+                    if os.path.isfile(file_path):
+                        self.exclude_file_a(file_path)
+            elif mime_data.hasText():
+                text = mime_data.text()
+                if os.path.isfile(text):
+                    self.exclude_file_a(text)
+            event.acceptProposedAction()
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении файла в исключения A: {e}")
+    
+    def exclude_b_drag_enter_event(self, event):
+        """Обработчик входа в зону перетаскивания для исключений B"""
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+    
+    def exclude_b_drag_move_event(self, event):
+        """Обработчик движения перетаскивания для исключений B"""
+        event.acceptProposedAction()
+    
+    def exclude_b_drop_event(self, event):
+        """Обработчик сброса файлов в исключения B"""
+        try:
+            mime_data = event.mimeData()
+            if mime_data.hasUrls():
+                urls = mime_data.urls()
+                for url in urls:
+                    file_path = url.toLocalFile()
+                    if os.path.isfile(file_path):
+                        self.exclude_file_b(file_path)
+            elif mime_data.hasText():
+                text = mime_data.text()
+                if os.path.isfile(text):
+                    self.exclude_file_b(text)
+            event.acceptProposedAction()
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении файла в исключения B: {e}")
+    
+    def exclude_file_a(self, file_path):
+        """Исключить файл из папки A"""
+        try:
+            logging.info(f"Пытаемся исключить файл A: {file_path}")
+            
+            # Проверяем, что файл есть в основной таблице A
+            if not self.is_file_in_table_a(file_path):
+                logging.warning(f"Файл не найден в таблице A: {file_path}")
+                return
+            
+            logging.info(f"Файл найден в таблице A, добавляем в исключения")
+            
+            # Добавляем в таблицу исключений
+            self.add_to_exclude_table(self.exclude_a_table, file_path)
+            
+            # Убираем из основной таблицы
+            self.remove_from_table_a(file_path)
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Файл исключен из A: {os.path.basename(file_path)}")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при исключении файла A: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось исключить файл: {str(e)}")
+    
+    def exclude_file_b(self, file_path):
+        """Исключить файл из папки B"""
+        try:
+            # Проверяем, что файл есть в основной таблице B
+            if not self.is_file_in_table_b(file_path):
+                return
+            
+            # Добавляем в таблицу исключений
+            self.add_to_exclude_table(self.exclude_b_table, file_path)
+            
+            # Убираем из основной таблицы
+            self.remove_from_table_b(file_path)
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Файл исключен из B: {os.path.basename(file_path)}")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при исключении файла B: {e}")
+    
+    def add_to_exclude_table(self, table, file_path):
+        """Добавить файл в таблицу исключений"""
+        try:
+            # Проверяем, что файл еще не в таблице
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item and item.data(Qt.UserRole) == file_path:
+                    return  # Файл уже есть
+            
+            # Добавляем новый файл
+            row = table.rowCount()
+            table.insertRow(row)
+            
+            # Создаем элемент с именем файла
+            name_item = QTableWidgetItem(os.path.basename(file_path))
+            name_item.setData(Qt.UserRole, file_path)  # Сохраняем полный путь
+            name_item.setToolTip(file_path)  # Показываем полный путь при наведении
+            
+            table.setItem(row, 0, name_item)
+            
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении в таблицу исключений: {e}")
+    
+    def remove_from_table_a(self, file_path):
+        """Убрать файл из таблицы A"""
+        try:
+            table = self.grp_a.table
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item and item.data(Qt.UserRole) == file_path:
+                    table.removeRow(row)
+                    break
+        except Exception as e:
+            logging.error(f"Ошибка при удалении из таблицы A: {e}")
+    
+    def remove_from_table_b(self, file_path):
+        """Убрать файл из таблицы B"""
+        try:
+            table = self.grp_b.table
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item and item.data(Qt.UserRole) == file_path:
+                    table.removeRow(row)
+                    break
+        except Exception as e:
+            logging.error(f"Ошибка при удалении из таблицы B: {e}")
+    
+    def is_file_in_table_a(self, file_path):
+        """Проверить, есть ли файл в таблице A"""
+        try:
+            table = self.grp_a.table
+            logging.info(f"Проверяем файл в таблице A: {file_path}")
+            logging.info(f"Количество строк в таблице A: {table.rowCount()}")
+            
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item:
+                    stored_path = item.data(Qt.UserRole)
+                    logging.info(f"Строка {row}: {stored_path}")
+                    if stored_path == file_path:
+                        logging.info(f"Файл найден в строке {row}")
+                        return True
+                else:
+                    logging.warning(f"Строка {row}: элемент не найден")
+            
+            logging.warning(f"Файл не найден в таблице A: {file_path}")
+            return False
+        except Exception as e:
+            logging.error(f"Ошибка при проверке файла в таблице A: {e}")
+            return False
+    
+    def is_file_in_table_b(self, file_path):
+        """Проверить, есть ли файл в таблице B"""
+        try:
+            table = self.grp_b.table
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item and item.data(Qt.UserRole) == file_path:
+                    return True
+            return False
+        except Exception as e:
+            logging.error(f"Ошибка при проверке файла в таблице B: {e}")
+            return False
+    
+    def restore_excluded_files_a(self):
+        """Вернуть выбранные файлы из исключений A"""
+        try:
+            selected_rows = set()
+            for item in self.exclude_a_table.selectedItems():
+                row = item.row()
+                if row not in selected_rows:
+                    selected_rows.add(row)
+            
+            # Обрабатываем строки в обратном порядке, чтобы не сбить индексы
+            for row in sorted(selected_rows, reverse=True):
+                item = self.exclude_a_table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path and os.path.isfile(file_path):
+                        # Возвращаем в основную таблицу A
+                        self.restore_file_to_table_a(file_path)
+                        # Убираем из таблицы исключений
+                        self.exclude_a_table.removeRow(row)
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Возвращено {len(selected_rows)} файлов из исключений A")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при возврате файлов из исключений A: {e}")
+    
+    def restore_excluded_files_b(self):
+        """Вернуть выбранные файлы из исключений B"""
+        try:
+            selected_rows = set()
+            for item in self.exclude_b_table.selectedItems():
+                row = item.row()
+                if row not in selected_rows:
+                    selected_rows.add(row)
+            
+            # Обрабатываем строки в обратном порядке, чтобы не сбить индексы
+            for row in sorted(selected_rows, reverse=True):
+                item = self.exclude_b_table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path and os.path.isfile(file_path):
+                        # Возвращаем в основную таблицу B
+                        self.restore_file_to_table_b(file_path)
+                        # Убираем из таблицы исключений
+                        self.exclude_b_table.removeRow(row)
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Возвращено {len(selected_rows)} файлов из исключений B")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при возврате файлов из исключений B: {e}")
+    
+    def restore_file_to_table_a(self, file_path):
+        """Вернуть файл в таблицу A"""
+        try:
+            table = self.grp_a.table
+            row = table.rowCount()
+            table.insertRow(row)
+            
+            # Создаем элемент с именем файла
+            name_item = QTableWidgetItem(os.path.basename(file_path))
+            name_item.setData(Qt.UserRole, file_path)
+            name_item.setToolTip(file_path)
+            
+            table.setItem(row, 0, name_item)
+            
+            # Сортируем таблицу
+            self.grp_a.sort_table()
+            
+        except Exception as e:
+            logging.error(f"Ошибка при возврате файла в таблицу A: {e}")
+    
+    def restore_file_to_table_b(self, file_path):
+        """Вернуть файл в таблицу B"""
+        try:
+            table = self.grp_b.table
+            row = table.rowCount()
+            table.insertRow(row)
+            
+            # Создаем элемент с именем файла
+            name_item = QTableWidgetItem(os.path.basename(file_path))
+            name_item.setData(Qt.UserRole, file_path)
+            name_item.setToolTip(file_path)
+            
+            # Создаем элемент с размером (если есть)
+            size_item = QTableWidgetItem()
+            if os.path.exists(file_path):
+                try:
+                    size = os.path.getsize(file_path)
+                    size_item.setText(self.format_file_size(size))
+                except:
+                    size_item.setText("")
+            
+            table.setItem(row, 0, name_item)
+            table.setItem(row, 1, size_item)
+            
+            # Сортируем таблицу
+            self.grp_b.sort_table()
+            
+        except Exception as e:
+            logging.error(f"Ошибка при возврате файла в таблицу B: {e}")
+    
+    def update_restore_buttons_state(self):
+        """Обновить состояние кнопок возврата файлов"""
+        try:
+            # Кнопка возврата A
+            has_selection_a = len(self.exclude_a_table.selectedItems()) > 0
+            self.restore_a_btn.setEnabled(has_selection_a)
+            
+            # Кнопка возврата B
+            has_selection_b = len(self.exclude_b_table.selectedItems()) > 0
+            self.restore_b_btn.setEnabled(has_selection_b)
+            
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении состояния кнопок возврата: {e}")
+    
+    def get_excluded_files_a(self):
+        """Получить список исключенных файлов A"""
+        try:
+            files = []
+            for row in range(self.exclude_a_table.rowCount()):
+                item = self.exclude_a_table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path:
+                        files.append(file_path)
+            return files
+        except Exception as e:
+            logging.error(f"Ошибка при получении списка исключений A: {e}")
+            return []
+    
+    def get_excluded_files_b(self):
+        """Получить список исключенных файлов B"""
+        try:
+            files = []
+            for row in range(self.exclude_b_table.rowCount()):
+                item = self.exclude_b_table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path:
+                        files.append(file_path)
+            return files
+        except Exception as e:
+            logging.error(f"Ошибка при получении списка исключений B: {e}")
+            return []
+    
+    def restore_excluded_files_lists(self):
+        """Восстановить списки исключений из настроек"""
+        try:
+            # Восстанавливаем исключения A
+            excluded_a = self.settings.value("excluded_files_a", [])
+            if excluded_a:
+                for file_path in excluded_a:
+                    if os.path.isfile(file_path):
+                        self.add_to_exclude_table(self.exclude_a_table, file_path)
+                        # Убираем из основной таблицы, если там есть
+                        if self.is_file_in_table_a(file_path):
+                            self.remove_from_table_a(file_path)
+            
+            # Восстанавливаем исключения B
+            excluded_b = self.settings.value("excluded_files_b", [])
+            if excluded_b:
+                for file_path in excluded_b:
+                    if os.path.isfile(file_path):
+                        self.add_to_exclude_table(self.exclude_b_table, file_path)
+                        # Убираем из основной таблицы, если там есть
+                        if self.is_file_in_table_b(file_path):
+                            self.remove_from_table_b(file_path)
+            
+            # Обновляем состояние кнопок
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Восстановлено {len(excluded_a or [])} исключений A и {len(excluded_b or [])} исключений B")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при восстановлении списков исключений: {e}")
+    
+    def show_context_menu_a(self, position):
+        """Показать контекстное меню для таблицы A"""
+        try:
+            table = self.grp_a.table
+            context_menu = QMenu(self)
+            
+            # Получаем выбранные строки
+            selected_rows = set()
+            for item in table.selectedItems():
+                if item.column() == 0:  # Только элементы первой колонки
+                    selected_rows.add(item.row())
+            
+            if selected_rows:
+                # Действие "Исключить"
+                exclude_action = context_menu.addAction("🚫 Исключить из сравнения")
+                exclude_action.triggered.connect(lambda: self.exclude_selected_files_a())
+                
+                # Разделитель
+                context_menu.addSeparator()
+                
+                # Действие "Открыть изображение"
+                open_action = context_menu.addAction("👁️ Открыть изображение")
+                open_action.triggered.connect(lambda: self.open_table_image_from_context(table, selected_rows))
+                
+                # Показываем меню
+                context_menu.exec_(table.mapToGlobal(position))
+                
+        except Exception as e:
+            logging.error(f"Ошибка при показе контекстного меню A: {e}")
+    
+    def show_context_menu_b(self, position):
+        """Показать контекстное меню для таблицы B"""
+        try:
+            table = self.grp_b.table
+            context_menu = QMenu(self)
+            
+            # Получаем выбранные строки
+            selected_rows = set()
+            for item in table.selectedItems():
+                if item.column() == 0:  # Только элементы первой колонки
+                    selected_rows.add(item.row())
+            
+            if selected_rows:
+                # Действие "Исключить"
+                exclude_action = context_menu.addAction("🚫 Исключить из сравнения")
+                exclude_action.triggered.connect(lambda: self.exclude_selected_files_b())
+                
+                # Разделитель
+                context_menu.addSeparator()
+                
+                # Действие "Открыть изображение"
+                open_action = context_menu.addAction("👁️ Открыть изображение")
+                open_action.triggered.connect(lambda: self.open_table_image_from_context(table, selected_rows))
+                
+                # Показываем меню
+                context_menu.exec_(table.mapToGlobal(position))
+                
+        except Exception as e:
+            logging.error(f"Ошибка при показе контекстного меню B: {e}")
+    
+    def exclude_selected_files_a(self):
+        """Исключить выбранные файлы из таблицы A"""
+        try:
+            table = self.grp_a.table
+            selected_rows = set()
+            
+            # Собираем выбранные строки
+            for item in table.selectedItems():
+                if item.column() == 0:  # Только элементы первой колонки
+                    selected_rows.add(item.row())
+            
+            if not selected_rows:
+                return
+            
+            # Обрабатываем строки в обратном порядке, чтобы не сбить индексы
+            for row in sorted(selected_rows, reverse=True):
+                item = table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path and os.path.isfile(file_path):
+                        # Исключаем файл
+                        self.exclude_file_a(file_path)
+                    else:
+                        logging.warning(f"Файл не найден или путь некорректен: {file_path}")
+                else:
+                    logging.warning(f"Не удалось получить элемент для строки {row}")
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Исключено {len(selected_rows)} файлов из A")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при исключении файлов A: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось исключить файлы: {str(e)}")
+    
+    def exclude_selected_files_b(self):
+        """Исключить выбранные файлы из таблицы B"""
+        try:
+            table = self.grp_b.table
+            selected_rows = set()
+            
+            # Собираем выбранные строки
+            for item in table.selectedItems():
+                if item.column() == 0:  # Только элементы первой колонки
+                    selected_rows.add(item.row())
+            
+            if not selected_rows:
+                return
+            
+            # Обрабатываем строки в обратном порядке, чтобы не сбить индексы
+            for row in sorted(selected_rows, reverse=True):
+                item = table.item(row, 0)
+                if item:
+                    file_path = item.data(Qt.UserRole)
+                    if file_path and os.path.isfile(file_path):
+                        # Исключаем файл
+                        self.exclude_file_b(file_path)
+                    else:
+                        logging.warning(f"Файл не найден или путь некорректен: {file_path}")
+                else:
+                    logging.warning(f"Не удалось получить элемент для строки {row}")
+            
+            # Обновляем состояние кнопки возврата
+            self.update_restore_buttons_state()
+            
+            logging.info(f"Исключено {len(selected_rows)} файлов из B")
+            
+        except Exception as e:
+            logging.error(f"Ошибка при исключении файлов B: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось исключить файлы: {str(e)}")
+    
+    def open_table_image_from_context(self, table, selected_rows):
+        """Открыть изображение из контекстного меню"""
+        try:
+            if not selected_rows:
+                return
+            
+            # Берем первый выбранный файл
+            row = min(selected_rows)
+            item = table.item(row, 0)
+            if item:
+                file_path = item.data(Qt.UserRole)
+                logging.info(f"Пытаемся открыть файл: {file_path}")
+                if file_path and os.path.isfile(file_path):
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+                    logging.info(f"Файл успешно открыт: {file_path}")
+                else:
+                    logging.warning(f"Файл не найден: {file_path}")
+                    QMessageBox.warning(self, "Ошибка", f"Файл не найден: {file_path}")
+            else:
+                logging.warning(f"Не удалось получить элемент для строки {row}")
+                QMessageBox.warning(self, "Ошибка", f"Не удалось получить элемент для строки {row}")
+        except Exception as e:
+            logging.error(f"Ошибка при открытии изображения из контекстного меню: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть изображение: {str(e)}")
+    
+    def format_file_size(self, size_bytes):
+        """Форматировать размер файла в читаемый вид"""
+        try:
+            if size_bytes < 1024:
+                return f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                return f"{size_bytes // 1024} KB"
+            elif size_bytes < 1024 * 1024 * 1024:
+                return f"{size_bytes // (1024 * 1024)} MB"
+            else:
+                return f"{size_bytes // (1024 * 1024 * 1024)} GB"
+        except:
+            return ""
 
 
 class ExternalResultViewer(QWidget):
