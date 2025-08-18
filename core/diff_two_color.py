@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import logging
 import gc
-from skimage.metrics import structural_similarity as ssim
+# from skimage.metrics import structural_similarity as ssim  # Заменяем на opencv
 logging.basicConfig(filename='diff.log', filemode='a', format='%(asctime)s %(levelname)s: %(message)s', level=logging.INFO)
 
 
@@ -60,16 +60,17 @@ def diff_two_color(
     meta = {}
 
     if use_ssim:
-        # Оптимизированная SSIM обработка
+        # Заменяем SSIM на простую разность (так как skimage не работает в exe)
         gray_old = cv2.cvtColor(old_img, cv2.COLOR_BGR2GRAY)
         gray_new = cv2.cvtColor(new_img, cv2.COLOR_BGR2GRAY)
-        score, diff_map = ssim(gray_old, gray_new, full=True)
-        diff_map = (diff_map * 255).astype("uint8")
+        
+        # Простая разность вместо SSIM
+        diff_map = cv2.absdiff(gray_old, gray_new)
         gray_add = diff_map
-        gray_del = np.zeros_like(diff_map)
+        gray_del = diff_map.copy()
         
         # Освобождаем память
-        del gray_old, gray_new, score
+        del gray_old, gray_new
     else:
         # 1. LAB-конверт (оптимизированный)
         old_lab = cv2.cvtColor(old_img, cv2.COLOR_BGR2LAB)
