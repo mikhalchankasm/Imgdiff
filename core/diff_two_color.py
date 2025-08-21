@@ -175,16 +175,24 @@ def diff_two_color(
         overlay[..., 3] = (overlay[..., 3].astype(np.float32) * alpha_map).astype(np.uint8)
         del alpha_map
 
-    # 11. Метрики (оптимизированные)
+    # 11. Метрики (оптимизированные) с защитой от деления на ноль
     mask_same = np.logical_not((mask_add > 0) | (mask_del > 0) | (mask_matched > 0))
     total_pixels = mask_same.size
     same_pixels = np.count_nonzero(mask_same)
     diff_pixels = total_pixels - same_pixels
     matched_pixels = np.count_nonzero(mask_matched)
     
-    meta['same_percent'] = same_pixels / total_pixels * 100
-    meta['diff_percent'] = diff_pixels / total_pixels * 100
-    meta['matched_percent'] = matched_pixels / total_pixels * 100
+    # Защита от деления на ноль
+    if total_pixels > 0:
+        meta['same_percent'] = same_pixels / total_pixels * 100
+        meta['diff_percent'] = diff_pixels / total_pixels * 100
+        meta['matched_percent'] = matched_pixels / total_pixels * 100
+    else:
+        # Fallback значения для пустых изображений
+        meta['same_percent'] = 100.0
+        meta['diff_percent'] = 0.0
+        meta['matched_percent'] = 0.0
+    
     meta['diff_pixels'] = int(diff_pixels)
     meta['matched_pixels'] = int(matched_pixels)
     meta['total_pixels'] = int(total_pixels)
