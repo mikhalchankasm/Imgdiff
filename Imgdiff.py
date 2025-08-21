@@ -353,23 +353,6 @@ class FilteredTable(QWidget):
         ]
         self.load_files(files, dir_path)
 
-    def restore_state(self, settings: QSettings):
-        dir_path = settings.value(f"{self.settings_key}/dir", "")
-        filter_text = settings.value(f"{self.settings_key}/filter", "")
-        sort_order = settings.value(f"{self.settings_key}/sort_order", "asc")
-        self.sort_order = sort_order
-        self.load_filter_history()
-        if dir_path and os.path.isdir(dir_path):
-            exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-            files = [
-                str(Path(dir_path) / f)
-                for f in os.listdir(dir_path)
-                if Path(f).suffix.lower() in exts
-            ]
-            self.load_files(files, dir_path)
-        self.filter_combo.setCurrentText(filter_text)
-        self.apply_filter()
-
     def load_filter_history(self):
         settings = QSettings("imgdiff", "imgdiff_gui")
         history = settings.value(f"{self.settings_key}/filter_history", [])
@@ -1873,10 +1856,20 @@ class MainWindow(QMainWindow):
             
             self.progress_bar.setValue(i + 1)
             
-            # Принудительная сборка мусора каждые 5 файлов для больших изображений
-            if (i + 1) % 5 == 0:
+            # Улучшенная сборка мусора: более часто для больших изображений
+            if (i + 1) % 3 == 0:  # Каждые 3 файла вместо 5
                 gc.collect()
                 QApplication.processEvents()
+                
+            # Дополнительная очистка памяти для очень больших изображений
+            if (i + 1) % 10 == 0:
+                import sys
+                if hasattr(sys, 'getsizeof'):
+                    # Принудительно очищаем кэш изображений
+                    if hasattr(self, '_preview_cache'):
+                        self._preview_cache.clear()
+                    gc.collect()
+                    QApplication.processEvents()
         
         self.progress_bar.hide()
         self.progress_bar.setFormat("")  # Сбрасываем формат
