@@ -1047,6 +1047,7 @@ class MainWindow(QMainWindow):
         self.paused = False
         # Результаты кеша между запусками
         self.result_cache = ResultCache()
+        self._cache_map = {}
         # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
         self.radio_sel = QRadioButton("Сравнить только выделенные")
@@ -2239,6 +2240,24 @@ class MainWindow(QMainWindow):
         self.result_table.setItem(r, 2, QTableWidgetItem(path))
         return r
 
+    def toggle_pause(self):
+        try:
+            self.paused = not getattr(self, 'paused', False)
+            if hasattr(self, 'pause_btn'):
+                self.pause_btn.setText("Resume" if self.paused else "Pause")
+        except Exception:
+            pass
+
+    def stop_batch(self):
+        try:
+            self.cancel_requested = True
+            if hasattr(self, 'pause_btn'):
+                self.pause_btn.setEnabled(False)
+            if hasattr(self, 'stop_btn'):
+                self.stop_btn.setEnabled(False)
+        except Exception:
+            pass
+
     def compare_parallel(self):
         files_a = self.grp_a.selected_files() if self.radio_sel.isChecked() else self.grp_a.all_files()
         files_b = self.grp_b.selected_files() if self.radio_sel.isChecked() else self.grp_b.all_files()
@@ -2328,6 +2347,8 @@ class MainWindow(QMainWindow):
                 settings_hash = compute_settings_hash(settings)
                 cache_key = self.result_cache.get_cache_key(img_a_hash, img_b_hash, settings_hash)
                 cached = self.result_cache.get(cache_key)
+                # сохранить ключ для записи результата по завершении
+                self._cache_map[out_name] = cache_key
             except Exception:
                 cache_key = None
 
