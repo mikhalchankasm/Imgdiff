@@ -1,0 +1,107 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "imgdiff-compare"
+version = "2.0.0"
+description = "Высокопроизводительный инструмент для визуального сравнения изображений"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "mikhalchankasm" }
+]
+keywords = ["image", "diff", "compare", "opencv", "computer-vision"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "opencv-python>=4.5.0",
+    "numpy>=1.20.0",
+    "PyQt5>=5.15.0",
+]
+
+[project.optional-dependencies]
+cli = [
+    "typer[all]>=0.9.0",
+    "rich>=13.0.0",
+]
+ssim = [
+    "scikit-image>=0.19.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "imgdiff-compare[cli,ssim,dev]"
+]
+
+[project.urls]
+Homepage = "https://github.com/mikhalchankasm/Imgdiff"
+Repository = "https://github.com/mikhalchankasm/Imgdiff"
+Issues = "https://github.com/mikhalchankasm/Imgdiff/issues"
+
+[project.scripts]
+imgdiff = "imgdiff.cli:main"
+imgdiff-gui = "imgdiff.gui.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["imgdiff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+

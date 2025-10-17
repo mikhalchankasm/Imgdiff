@@ -1,6 +1,21 @@
-opencv-python
-numpy
-PyQt5
-pytest
-scikit-image
-scipy 
+# Основные зависимости
+opencv-python>=4.5.0
+numpy>=1.20.0
+PyQt5>=5.15.0
+
+# Опциональные зависимости
+# Для CLI:
+# typer[all]>=0.9.0
+# rich>=13.0.0
+
+# Для SSIM:
+# scikit-image>=0.19.0
+# scipy
+
+# Для разработки:
+# pytest>=7.0.0
+# pytest-benchmark>=4.0.0
+# pytest-cov>=4.0.0
+# ruff>=0.1.0
+# black>=23.0.0
+# mypy>=1.0.0
