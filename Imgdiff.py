@@ -29,6 +29,13 @@ from PyQt5.QtWidgets import (
 # Дублирующиеся импорты убраны
 
 from core.diff_two_color import diff_two_color
+try:
+    # Быстрое ядро (ROI) из пакета imgdiff
+    from imgdiff.core.diff import diff_mask_fast, coarse_to_fine
+    from imgdiff.core.morph import filter_small_components, dilate_mask
+    FAST_CORE_AVAILABLE = True
+except Exception:
+    FAST_CORE_AVAILABLE = False
 from core.slider_reveal import SliderReveal
 # Временно отключена функциональность смещения изображенийcl
 from core.image_alignment import ImageAlignmentManager
@@ -154,6 +161,7 @@ class CompareWorker(QRunnable):
                 self.params['debug'],
                 self.params['use_ssim'],
                 self.params['output_dir'],
+                self.params.get('use_fast_core', True),
             )
             self.signals.finished.emit(self.params['out_name'], str(self.out_path), code, "")
         except Exception as e:
@@ -161,7 +169,7 @@ class CompareWorker(QRunnable):
 
 def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_color_bgr,
                      match_tolerance, match_color_bgr, gamma, morph_open, min_area,
-                     debug, use_ssim, output_dir):
+                     debug, use_ssim, output_dir, use_fast_core: bool = True):
     """Потокобезопасное сравнение пары изображений с сохранением результата.
     Возвращает 1 если есть отличия, 0 если равны.
     """
@@ -187,8 +195,72 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
     except Exception:
         pass
 
-    debug_dir = Path(output_dir) / 'debug' if debug and output_dir else Path('.')
+    if use_fast_core and FAST_CORE_AVAILABLE:
+        # Coarse-to-fine mask с локальным уточнением
+        boxes = coarse_to_fine(old, new, fuzz=max(3, int(fuzz)), scale=0.25, min_area=max(10, int(min_area/2)), use_lab=True)
+        if not boxes:
+            del old, new
+            return 0
 
+        mask_total = np.zeros((h, w), dtype=np.uint8)
+        mask_add_total = np.zeros((h, w), dtype=np.uint8)
+        mask_del_total = np.zeros((h, w), dtype=np.uint8)
+
+        for (x, y, bw, bh) in boxes:
+            roi_a = old[y:y+bh, x:x+bw]
+            roi_b = new[y:y+bh, x:x+bw]
+            roi_mask = diff_mask_fast(roi_a, roi_b, fuzz=fuzz, use_lab=True)
+            if cv2.countNonZero(roi_mask) == 0:
+                continue
+            # Наращиваем общий mask
+            current = mask_total[y:y+bh, x:x+bw]
+            mask_total[y:y+bh, x:x+bw] = cv2.bitwise_or(current, roi_mask)
+
+            # Направление изменений (add/del) внутри ROI
+            old_lab = cv2.cvtColor(roi_a, cv2.COLOR_BGR2LAB)
+            new_lab = cv2.cvtColor(roi_b, cv2.COLOR_BGR2LAB)
+            diff_add = cv2.subtract(new_lab, old_lab)
+            diff_del = cv2.subtract(old_lab, new_lab)
+            gray_add = cv2.cvtColor(diff_add, cv2.COLOR_BGR2GRAY)
+            gray_del = cv2.cvtColor(diff_del, cv2.COLOR_BGR2GRAY)
+            _, add_bin = cv2.threshold(gray_add, max(1, int(fuzz)), 255, cv2.THRESH_BINARY)
+            _, del_bin = cv2.threshold(gray_del, max(1, int(fuzz)), 255, cv2.THRESH_BINARY)
+            add_bin = cv2.bitwise_and(add_bin, roi_mask)
+            del_bin = cv2.bitwise_and(del_bin, roi_mask)
+            # Наращиваем глобальные карты add/del
+            cur_a = mask_add_total[y:y+bh, x:x+bw]
+            cur_d = mask_del_total[y:y+bh, x:x+bw]
+            mask_add_total[y:y+bh, x:x+bw] = cv2.bitwise_or(cur_a, add_bin)
+            mask_del_total[y:y+bh, x:x+bw] = cv2.bitwise_or(cur_d, del_bin)
+
+        # Постобработка
+        mask_total = filter_small_components(mask_total, min_area=min_area)
+        mask_total = dilate_mask(mask_total, thickness=thick)
+        mask_add_total = cv2.bitwise_and(mask_add_total, mask_total)
+        mask_del_total = cv2.bitwise_and(mask_del_total, mask_total)
+
+        diff_pixels = int(cv2.countNonZero(mask_total))
+        if diff_pixels == 0:
+            del old, new
+            return 0
+
+        # Сборка RGBA overlay (как раньше)
+        overlay = np.zeros((h, w, 4), dtype=np.uint8)
+        overlay[..., :3] = new
+        overlay[..., 3] = 0
+        alpha_val = int(255 * 0.6)
+        overlay[mask_add_total > 0, :3] = add_color_bgr
+        overlay[mask_add_total > 0, 3] = alpha_val
+        overlay[mask_del_total > 0, :3] = del_color_bgr
+        overlay[mask_del_total > 0, 3] = alpha_val
+
+        # Запись результата
+        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        del old, new, overlay
+        return 1
+
+    # Fallback: старая двухцветная LAB‑дифференциация на весь кадр
+    debug_dir = Path(output_dir) / 'debug' if debug and output_dir else Path('.')
     overlay, meta = diff_two_color(
         old_img=old,
         new_img=new,
@@ -2147,6 +2219,7 @@ class MainWindow(QMainWindow):
                 'match_color_bgr': match_color_bgr,
                 'output_dir': self.output_dir,
                 'out_name': out_name,
+                'use_fast_core': True,
             }
             worker = CompareWorker(a, b, out_path, params)
             worker.signals.finished.connect(self._on_worker_finished)
