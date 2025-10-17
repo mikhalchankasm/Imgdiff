@@ -17,7 +17,7 @@ os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 # ✅ НАВИГАЦИЯ РАБОТАЕТ: Кнопки ◀▶ для переключения между парами изображений
 
 # flake8: noqa: E402
-from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QMimeData
+from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QMimeData, QRect, QObject, QRunnable, QThreadPool
 from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter, QKeySequence, QDrag, QPen
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -46,7 +46,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-MAX_PREVIEW_SIZE = 2000
+MAX_PREVIEW_SIZE = 1200
 
 def natural_sort_key(text):
     """
@@ -80,13 +80,103 @@ def safe_cv2_imread(path):
         return cv2.imread(str(path), cv2.IMREAD_COLOR)
 
 def load_pixmap_scaled(path, max_size=MAX_PREVIEW_SIZE):
-    img = safe_cv2_imread(path)
+    img = fast_cv2_imread(path)
     if img is None: return QPixmap()
     h, w = img.shape[:2]
     if h > max_size or w > max_size:
         scale = max_size / max(h, w)
         img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
     return QPixmap.fromImage(cv2_to_qimage(img))
+
+def quick_diff_ratio(img_a: np.ndarray, img_b: np.ndarray, max_side: int = 256, thr: int = 5) -> float:
+    """Быстрый оценочный процент отличий на даунскейле.
+    Возвращает долю пикселей (0..1) где |A-B| > thr в градациях серого.
+    """
+    try:
+        h, w = img_a.shape[:2]
+        scale = min(1.0, max_side / max(h, w))
+        if scale < 1.0:
+            a = cv2.resize(img_a, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+            b = cv2.resize(img_b, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+        else:
+            a, b = img_a, img_b
+        ag = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
+        bg = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
+        diff = cv2.absdiff(ag, bg)
+        _, mask = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
+        return float(cv2.countNonZero(mask)) / float(mask.size)
+    except Exception:
+        return 1.0
+
+def fast_cv2_imread(path):
+    """Быстрое чтение изображения: cv2.imread -> fallback на imdecode."""
+    try:
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if img is not None:
+            return img
+    except Exception:
+        pass
+    try:
+        with open(path, 'rb') as f:
+            img_array = np.asarray(bytearray(f.read()), dtype=np.uint8)
+            return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_color_bgr,
+                     match_tolerance, match_color_bgr, gamma, morph_open, min_area,
+                     debug, use_ssim, output_dir):
+    """Потокобезопасное сравнение пары изображений с сохранением результата.
+    Возвращает 1 если есть отличия, 0 если равны.
+    """
+    old = fast_cv2_imread(str(left))
+    new = fast_cv2_imread(str(right))
+    if old is None or new is None:
+        raise FileNotFoundError(f"Не удалось загрузить {left} или {right}")
+
+    # Выравниваем размеры
+    h = max(old.shape[0], new.shape[0])
+    w = max(old.shape[1], new.shape[1])
+    if old.shape[:2] != (h, w):
+        old = cv2.resize(old, (w, h), interpolation=cv2.INTER_LANCZOS4)
+    if new.shape[:2] != (h, w):
+        new = cv2.resize(new, (w, h), interpolation=cv2.INTER_LANCZOS4)
+
+    # Быстрый ранний фильтр на даунскейле
+    try:
+        ratio = quick_diff_ratio(old, new, max_side=256, thr=5)
+        if ratio < 0.001:
+            del old, new
+            return 0
+    except Exception:
+        pass
+
+    debug_dir = Path(output_dir) / 'debug' if debug and output_dir else Path('.')
+
+    overlay, meta = diff_two_color(
+        old_img=old,
+        new_img=new,
+        sens=fuzz,
+        blur=3,
+        morph_open=morph_open,
+        min_area=min_area,
+        kernel=thick,
+        alpha=0.6,
+        gamma=gamma,
+        del_color=del_color_bgr,
+        add_color=add_color_bgr,
+        debug=debug,
+        debug_dir=debug_dir,
+        use_ssim=use_ssim,
+        match_tolerance=match_tolerance,
+        match_color=match_color_bgr
+    )
+
+    if meta.get('diff_pixels', 0) > 0:
+        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+
+    del old, new, overlay
+    return 1 if meta.get('diff_pixels', 0) > 0 else 0
 
 class DndTableWidget(QTableWidget):
     directory_dropped = pyqtSignal(str)
@@ -723,8 +813,12 @@ class SliderReveal(QWidget):
         if not self.overlay_mode:
             # Обычный режим слайдера
             split_x = int(self.slider_pos * self.pixmap_a.width())
-            qp.drawPixmap(0, 0, self.pixmap_a.copy(0, 0, split_x, self.pixmap_a.height()))
-            qp.drawPixmap(split_x, 0, self.pixmap_b.copy(split_x, 0, self.pixmap_b.width() - split_x, self.pixmap_b.height()))
+            # Рисуем частями без копирования буферов
+            qp.drawPixmap(QRect(0, 0, split_x, self.pixmap_a.height()), self.pixmap_a,
+                          QRect(0, 0, split_x, self.pixmap_a.height()))
+            qp.drawPixmap(QRect(split_x, 0, self.pixmap_b.width() - split_x, self.pixmap_b.height()),
+                          self.pixmap_b,
+                          QRect(split_x, 0, self.pixmap_b.width() - split_x, self.pixmap_b.height()))
             # Линия слайдера в координатах изображения
             qp.setPen(QColor(0, 120, 215, 180))
             qp.drawLine(split_x, 0, split_x, self.pixmap_a.height())
@@ -1855,8 +1949,12 @@ class MainWindow(QMainWindow):
                 logging.error(f"Exception: {e}")
                 status = f"Error: {e}"
                 row = name_to_row.get(out_name)
-                if row is not None:
-                    self.result_table.setItem(row, 1, QTableWidgetItem(status))
+                if row is None:
+                    row = self.result_table.rowCount()
+                    self.result_table.insertRow(row)
+                    self.result_table.setItem(row, 0, QTableWidgetItem(out_name))
+                    self.result_table.setItem(row, 2, QTableWidgetItem(str(out_path)))
+                self.result_table.setItem(row, 1, QTableWidgetItem(status))
                 self.progress_bar.setValue(i + 1)
                 continue
             
@@ -1868,8 +1966,12 @@ class MainWindow(QMainWindow):
                 status = "Error"
             
             row = name_to_row.get(out_name)
-            if row is not None:
-                self.result_table.setItem(row, 1, QTableWidgetItem(status))
+            if row is None:
+                row = self.result_table.rowCount()
+                self.result_table.insertRow(row)
+                self.result_table.setItem(row, 0, QTableWidgetItem(out_name))
+                self.result_table.setItem(row, 2, QTableWidgetItem(str(out_path)))
+            self.result_table.setItem(row, 1, QTableWidgetItem(status))
             
             self.progress_bar.setValue(i + 1)
             
@@ -1918,8 +2020,8 @@ class MainWindow(QMainWindow):
         self.result_table.setItem(row, 2, QTableWidgetItem(path))
 
     def run_outline(self, left, right, out_path, fuzz, thick, color_hex, match_tolerance, match_color):
-        old = safe_cv2_imread(str(left))
-        new = safe_cv2_imread(str(right))
+        old = fast_cv2_imread(str(left))
+        new = fast_cv2_imread(str(right))
         if old is None or new is None:
             raise FileNotFoundError(f"Не могу открыть {left} или {right}")
         
@@ -1955,6 +2057,16 @@ class MainWindow(QMainWindow):
         use_ssim = self.ssim_chk.isChecked()
         debug_dir = Path(self.output_dir) / 'debug' if debug else Path('.')
         
+        # Быстрый предфильтр: на даунскейле проверяем отличия
+        try:
+            ratio = quick_diff_ratio(old, new, max_side=256, thr=5)
+            if ratio < 0.001:
+                # Почти равны — рано выходим без тяжелого diff
+                del old, new
+                return 0
+        except Exception:
+            pass
+
         overlay, meta = diff_two_color(
             old_img=old,
             new_img=new,
@@ -1975,7 +2087,7 @@ class MainWindow(QMainWindow):
         )
         
         # Сохраняем с оптимальным сжатием для уменьшения размера файла
-        success = cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+        success = cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
         if not success:
             raise Exception(f"Не удалось сохранить результат в {out_path}")
         
@@ -2101,7 +2213,7 @@ class MainWindow(QMainWindow):
                 self.update_save_button_state()
             else:
                 # Fallback к cv2 если QPixmap не смог загрузить
-                img = safe_cv2_imread(img_path)
+                img = fast_cv2_imread(img_path)
                 if img is not None:
                     pix = QPixmap.fromImage(cv2_to_qimage(img))
                     pix.setDevicePixelRatio(1.0)
@@ -2404,7 +2516,7 @@ class MainWindow(QMainWindow):
         if cell is not None:
             path = cell.text()
             if os.path.isfile(path):
-                img = safe_cv2_imread(path)
+                img = fast_cv2_imread(path)
                 if img is not None:
                     pix = QPixmap.fromImage(cv2_to_qimage(img))
                     pix.setDevicePixelRatio(1.0)
@@ -2484,8 +2596,8 @@ class MainWindow(QMainWindow):
             
             try:
                 # Загружаем исходные изображения в полном разрешении
-                img_a_cv = safe_cv2_imread(a)
-                img_b_cv = safe_cv2_imread(b)
+                img_a_cv = fast_cv2_imread(a)
+                img_b_cv = fast_cv2_imread(b)
                 
                 if img_a_cv is None or img_b_cv is None:
                     raise Exception(f"Не удалось загрузить одно из изображений: {a} или {b}")
@@ -3298,8 +3410,8 @@ class MainWindow(QMainWindow):
 
         if file_a and file_b:
             # Загружаем изображения в оригинальном разрешении (без смещения)
-            img_a_cv = safe_cv2_imread(file_a)
-            img_b_cv = safe_cv2_imread(file_b)
+            img_a_cv = fast_cv2_imread(file_a)
+            img_b_cv = fast_cv2_imread(file_b)
             if img_a_cv is not None and img_b_cv is not None:
                 img_a = QPixmap.fromImage(cv2_to_qimage(img_a_cv))
                 img_b = QPixmap.fromImage(cv2_to_qimage(img_b_cv))
@@ -3899,4 +4011,3 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
-
