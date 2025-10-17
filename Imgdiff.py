@@ -162,6 +162,11 @@ class CompareWorker(QRunnable):
                 self.params['use_ssim'],
                 self.params['output_dir'],
                 self.params.get('use_fast_core', True),
+                self.params.get('save_only_diffs', True),
+                self.params.get('png_compression', 1),
+                self.params.get('quick_ratio_threshold', 0.001),
+                self.params.get('quick_max_side', 256),
+                5,
             )
             self.signals.finished.emit(self.params['out_name'], str(self.out_path), code, "")
         except Exception as e:
@@ -169,7 +174,12 @@ class CompareWorker(QRunnable):
 
 def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_color_bgr,
                      match_tolerance, match_color_bgr, gamma, morph_open, min_area,
-                     debug, use_ssim, output_dir, use_fast_core: bool = True):
+                     debug, use_ssim, output_dir, use_fast_core: bool = True,
+                     save_only_diffs: bool = True,
+                     png_compression: int = 1,
+                     quick_ratio_threshold: float = 0.001,
+                     quick_max_side: int = 256,
+                     quick_absdiff_thr: int = 5):
     """Потокобезопасное сравнение пары изображений с сохранением результата.
     Возвращает 1 если есть отличия, 0 если равны.
     """
@@ -188,8 +198,8 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
 
     # Быстрый ранний фильтр на даунскейле
     try:
-        ratio = quick_diff_ratio(old, new, max_side=256, thr=5)
-        if ratio < 0.001:
+        ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=quick_absdiff_thr)
+        if ratio < quick_ratio_threshold:
             del old, new
             return 0
     except Exception:
@@ -255,7 +265,8 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
         overlay[mask_del_total > 0, 3] = alpha_val
 
         # Запись результата
-        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        if (diff_pixels > 0) or (not save_only_diffs):
+            cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, int(png_compression)])
         del old, new, overlay
         return 1
 
@@ -280,8 +291,8 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
         match_color=match_color_bgr
     )
 
-    if meta.get('diff_pixels', 0) > 0:
-        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+    if (meta.get('diff_pixels', 0) > 0) or (not save_only_diffs):
+        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, int(png_compression)])
 
     del old, new, overlay
     return 1 if meta.get('diff_pixels', 0) > 0 else 0
@@ -1228,6 +1239,48 @@ class MainWindow(QMainWindow):
             }
         """)
         param_group.setLayout(param_form)
+        # --- Performance controls (added after base params) ---
+        self.fast_core_chk = QCheckBox("Fast ROI core")
+        self.fast_core_chk.setChecked(True)
+        self.fast_core_chk.setToolTip("Использовать быстрый ROI-пайплайн (coarse-to-fine)")
+        self.fast_core_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.save_only_diffs_chk = QCheckBox("Save only diffs")
+        self.save_only_diffs_chk.setChecked(True)
+        self.save_only_diffs_chk.setToolTip("Сохранять файл только если есть отличия")
+        self.save_only_diffs_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.png_compression_spin = QSpinBox()
+        self.png_compression_spin.setRange(0, 9)
+        self.png_compression_spin.setValue(1)
+        self.png_compression_spin.setToolTip("PNG compression (0=быстрее, 9=меньше)")
+        self.png_compression_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.quick_ratio_spin = QDoubleSpinBox()
+        self.quick_ratio_spin.setRange(0.0, 100.0)
+        self.quick_ratio_spin.setSingleStep(0.05)
+        self.quick_ratio_spin.setValue(0.10)
+        self.quick_ratio_spin.setSuffix(" %")
+        self.quick_ratio_spin.setToolTip("Порог раннего выхода (отличий на даунскейле, %)")
+        self.quick_ratio_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.quick_max_side_spin = QSpinBox()
+        self.quick_max_side_spin.setRange(64, 2048)
+        self.quick_max_side_spin.setValue(256)
+        self.quick_max_side_spin.setToolTip("Макс. сторона для быстрого даунскейла")
+        self.quick_max_side_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 32)
+        try:
+            import os as _os
+            self.workers_spin.setValue(max(1, min((_os.cpu_count() or 4), 8)))
+        except Exception:
+            self.workers_spin.setValue(4)
+        self.workers_spin.setToolTip("Количество параллельных задач")
+        self.workers_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        # Append rows
+        param_form.addRow("Fast core", self.fast_core_chk)
+        param_form.addRow("Save only diffs", self.save_only_diffs_chk)
+        param_form.addRow("PNG compression", self.png_compression_spin)
+        param_form.addRow("Quick pre-check (%)", self.quick_ratio_spin)
+        param_form.addRow("Quick max side", self.quick_max_side_spin)
+        param_form.addRow("Workers", self.workers_spin)
         param_group.setMaximumWidth(350)
         # --- 📚 Пояснения отдельным блоком ---
         param_help = QLabel(
@@ -2200,6 +2253,17 @@ class MainWindow(QMainWindow):
         add_color_bgr = (self.add_color.blue(), self.add_color.green(), self.add_color.red())
         match_color_bgr = (self.match_color.blue(), self.match_color.green(), self.match_color.red())
 
+        # Настроить пул потоков
+        try:
+            self.threadpool.setMaxThreadCount(int(self.workers_spin.value()))
+        except Exception:
+            pass
+        use_fast_core = True if not hasattr(self, 'fast_core_chk') else self.fast_core_chk.isChecked()
+        save_only_diffs = True if not hasattr(self, 'save_only_diffs_chk') else self.save_only_diffs_chk.isChecked()
+        png_compression = 1 if not hasattr(self, 'png_compression_spin') else int(self.png_compression_spin.value())
+        quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
+        quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
+
         for a, b in zip(files_a, files_b):
             out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
             out_path = Path(self.output_dir) / out_name
@@ -2219,7 +2283,11 @@ class MainWindow(QMainWindow):
                 'match_color_bgr': match_color_bgr,
                 'output_dir': self.output_dir,
                 'out_name': out_name,
-                'use_fast_core': True,
+                'use_fast_core': use_fast_core,
+                'save_only_diffs': save_only_diffs,
+                'png_compression': png_compression,
+                'quick_ratio_threshold': quick_ratio_threshold,
+                'quick_max_side': quick_max_side,
             }
             worker = CompareWorker(a, b, out_path, params)
             worker.signals.finished.connect(self._on_worker_finished)
@@ -2313,8 +2381,10 @@ class MainWindow(QMainWindow):
         
         # Быстрый предфильтр: на даунскейле проверяем отличия
         try:
-            ratio = quick_diff_ratio(old, new, max_side=256, thr=5)
-            if ratio < 0.001:
+            quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
+            quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
+            ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=5)
+            if ratio < quick_ratio_threshold:
                 # Почти равны — рано выходим без тяжелого diff
                 del old, new
                 return 0
@@ -2643,6 +2713,16 @@ class MainWindow(QMainWindow):
         self.settings.setValue("ssim", self.ssim_chk.isChecked())
         self.settings.setValue("match_tolerance", self.match_tolerance_spin.value())
         self.settings.setValue("match_color", self.match_color.name())
+        # Доп. производительность
+        try:
+            self.settings.setValue("fast_core", self.fast_core_chk.isChecked())
+            self.settings.setValue("save_only_diffs", self.save_only_diffs_chk.isChecked())
+            self.settings.setValue("png_compression", int(self.png_compression_spin.value()))
+            self.settings.setValue("quick_ratio_percent", float(self.quick_ratio_spin.value()))
+            self.settings.setValue("quick_max_side", int(self.quick_max_side_spin.value()))
+            self.settings.setValue("workers", int(self.workers_spin.value()))
+        except Exception:
+            pass
         # Сохраняем размеры сплиттеров
         self.settings.setValue("splitter_sizes", self.splitter.sizes())
         self.settings.setValue("main_splitter_sizes", self.main_splitter.sizes())
@@ -2709,6 +2789,28 @@ class MainWindow(QMainWindow):
             self.match_color = QColor(match_color)
             self.match_color_btn.setText(f"Цвет совпадений: {self.match_color.name()}")
             self.match_color_btn.setStyleSheet(f"background:{self.match_color.name()}; color:white")
+        # Доп. производительность
+        try:
+            fast_core = self.settings.value("fast_core")
+            if fast_core is not None and hasattr(self, 'fast_core_chk'):
+                self.fast_core_chk.setChecked(fast_core == "true" or fast_core is True)
+            save_only_diffs = self.settings.value("save_only_diffs")
+            if save_only_diffs is not None and hasattr(self, 'save_only_diffs_chk'):
+                self.save_only_diffs_chk.setChecked(save_only_diffs == "true" or save_only_diffs is True)
+            png_compression = self.settings.value("png_compression")
+            if png_compression and hasattr(self, 'png_compression_spin'):
+                self.png_compression_spin.setValue(int(png_compression))
+            quick_ratio_percent = self.settings.value("quick_ratio_percent")
+            if quick_ratio_percent and hasattr(self, 'quick_ratio_spin'):
+                self.quick_ratio_spin.setValue(float(quick_ratio_percent))
+            quick_max_side = self.settings.value("quick_max_side")
+            if quick_max_side and hasattr(self, 'quick_max_side_spin'):
+                self.quick_max_side_spin.setValue(int(quick_max_side))
+            workers = self.settings.value("workers")
+            if workers and hasattr(self, 'workers_spin'):
+                self.workers_spin.setValue(int(workers))
+        except Exception:
+            pass
         # Восстанавливаем размеры сплиттеров
         splitter_sizes = self.settings.value("splitter_sizes")
         if splitter_sizes:
