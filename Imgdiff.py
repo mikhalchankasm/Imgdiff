@@ -1,4 +1,5 @@
 import os
+import time
 import sys
 import shutil
 import logging
@@ -33,6 +34,7 @@ try:
     # Быстрое ядро (ROI) из пакета imgdiff
     from imgdiff.core.diff import diff_mask_fast, coarse_to_fine
     from imgdiff.core.morph import filter_small_components, dilate_mask
+    from imgdiff.core.io import ResultCache, compute_file_hash, compute_settings_hash
     FAST_CORE_AVAILABLE = True
 except Exception:
     FAST_CORE_AVAILABLE = False
@@ -131,7 +133,7 @@ def fast_cv2_imread(path):
         return None
 
 class WorkerSignals(QObject):
-    finished = pyqtSignal(str, str, int, str)  # out_name, out_path, code, error_message
+    finished = pyqtSignal(str, str, int, str, float)  # out_name, out_path, code, error_message, duration_s
 
 
 class CompareWorker(QRunnable):
@@ -145,6 +147,20 @@ class CompareWorker(QRunnable):
 
     def run(self):
         try:
+            start_t = time.perf_counter()
+            # Пауза/отмена перед стартом
+            cancel_fn = self.params.get('cancel_fn')
+            pause_fn = self.params.get('pause_fn')
+            if callable(cancel_fn) and cancel_fn():
+                self.signals.finished.emit(self.params['out_name'], str(self.out_path), -1, "Cancelled", 0.0)
+                return
+            # Уважать паузу
+            if callable(pause_fn):
+                while pause_fn():
+                    if callable(cancel_fn) and cancel_fn():
+                        self.signals.finished.emit(self.params['out_name'], str(self.out_path), -1, "Cancelled", 0.0)
+                        return
+                    time.sleep(0.05)
             code = run_outline_core(
                 self.a,
                 self.b,
@@ -168,9 +184,10 @@ class CompareWorker(QRunnable):
                 self.params.get('quick_max_side', 256),
                 5,
             )
-            self.signals.finished.emit(self.params['out_name'], str(self.out_path), code, "")
+            duration_s = max(0.0, time.perf_counter() - start_t)
+            self.signals.finished.emit(self.params['out_name'], str(self.out_path), code, "", duration_s)
         except Exception as e:
-            self.signals.finished.emit(self.params['out_name'], str(self.out_path), -1, str(e))
+            self.signals.finished.emit(self.params['out_name'], str(self.out_path), -1, str(e), 0.0)
 
 def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_color_bgr,
                      match_tolerance, match_color_bgr, gamma, morph_open, min_area,
@@ -1025,6 +1042,11 @@ class MainWindow(QMainWindow):
         self.batch_ok = 0
         self.batch_equal = 0
         self.batch_err = 0
+        self.avg_item_time = 0.0
+        self.cancel_requested = False
+        self.paused = False
+        # Результаты кеша между запусками
+        self.result_cache = ResultCache()
         # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
         self.radio_sel = QRadioButton("Сравнить только выделенные")
@@ -1129,7 +1151,18 @@ class MainWindow(QMainWindow):
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
         result_col.addWidget(radio_box)
-        result_col.addWidget(self.compare_btn)
+        # Панель управления батчем
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.stop_batch)
+        ctl_row = QHBoxLayout()
+        ctl_row.addWidget(self.compare_btn)
+        ctl_row.addWidget(self.pause_btn)
+        ctl_row.addWidget(self.stop_btn)
+        result_col.addLayout(ctl_row)
         results_label = QLabel("📊 Результаты:")
         results_label.setStyleSheet("""
             QLabel {
@@ -2229,6 +2262,10 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.compare_btn.setEnabled(False)
+        # Управление батчем
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("Pause")
+        self.stop_btn.setEnabled(True)
 
         exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
         all_result_files = [
@@ -2264,6 +2301,83 @@ class MainWindow(QMainWindow):
         quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
         quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
 
+        # Пройти пары: сначала кеш‑хиты, потом запуск задач
+        for a, b in zip(files_a, files_b):
+            out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
+            out_path = Path(self.output_dir) / out_name
+            self._ensure_result_row(out_name, str(out_path))
+            self.progress_bar.setFormat(f"��ࠡ�⪠: {Path(a).name} vs {Path(b).name}")
+
+            # Кеш: вычислить ключ
+            cached = None
+            try:
+                img_a_hash = compute_file_hash(a)
+                img_b_hash = compute_file_hash(b)
+                settings = {
+                    'fuzz': fuzz,
+                    'thick': thick,
+                    'min_area': min_area,
+                    'gamma': gamma,
+                    'morph_open': morph_open,
+                    'use_ssim': use_ssim,
+                    'match_tolerance': match_tolerance,
+                    'del_color_bgr': del_color_bgr,
+                    'add_color_bgr': add_color_bgr,
+                    'use_fast_core': use_fast_core,
+                }
+                settings_hash = compute_settings_hash(settings)
+                cache_key = self.result_cache.get_cache_key(img_a_hash, img_b_hash, settings_hash)
+                cached = self.result_cache.get(cache_key)
+            except Exception:
+                cache_key = None
+
+            if cached and isinstance(cached, dict):
+                code_cached = cached.get('code')
+                if code_cached == 0:
+                    row = self._ensure_result_row(out_name, str(out_path))
+                    self.result_table.setItem(row, 1, QTableWidgetItem("Equal (cached)"))
+                    self.batch_done += 1
+                    self.batch_equal += 1
+                    self.progress_bar.setValue(self.batch_done)
+                    QApplication.processEvents()
+                    continue
+                if code_cached == 1 and out_path.exists():
+                    row = self._ensure_result_row(out_name, str(out_path))
+                    self.result_table.setItem(row, 1, QTableWidgetItem("OK (cached)"))
+                    self.batch_done += 1
+                    self.batch_ok += 1
+                    self.progress_bar.setValue(self.batch_done)
+                    QApplication.processEvents()
+                    continue
+
+            # Параметры воркера
+            params = {
+                'fuzz': fuzz,
+                'thick': thick,
+                'match_tolerance': match_tolerance,
+                'gamma': gamma,
+                'morph_open': morph_open,
+                'min_area': min_area,
+                'debug': debug,
+                'use_ssim': use_ssim,
+                'del_color_bgr': del_color_bgr,
+                'add_color_bgr': add_color_bgr,
+                'match_color_bgr': match_color_bgr,
+                'output_dir': self.output_dir,
+                'out_name': out_name,
+                'use_fast_core': use_fast_core,
+                'save_only_diffs': save_only_diffs,
+                'png_compression': png_compression,
+                'quick_ratio_threshold': quick_ratio_threshold,
+                'quick_max_side': quick_max_side,
+                'cancel_fn': (lambda: self.cancel_requested),
+                'pause_fn': (lambda: self.paused),
+                'cache_key': cache_key,
+            }
+            worker = CompareWorker(a, b, out_path, params)
+            worker.signals.finished.connect(self._on_worker_finished)
+            self.threadpool.start(worker)
+
         for a, b in zip(files_a, files_b):
             out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
             out_path = Path(self.output_dir) / out_name
@@ -2293,7 +2407,7 @@ class MainWindow(QMainWindow):
             worker.signals.finished.connect(self._on_worker_finished)
             self.threadpool.start(worker)
 
-    def _on_worker_finished(self, out_name: str, out_path: str, code: int, error_message: str):
+    def _on_worker_finished(self, out_name: str, out_path: str, code: int, error_message: str, duration_s: float = 0.0):
         if code == 1:
             status = "OK"
             self.batch_ok += 1
@@ -4367,3 +4481,8 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
+
+
+
