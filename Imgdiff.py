@@ -123,6 +123,42 @@ def fast_cv2_imread(path):
     except Exception:
         return None
 
+class WorkerSignals(QObject):
+    finished = pyqtSignal(str, str, int, str)  # out_name, out_path, code, error_message
+
+
+class CompareWorker(QRunnable):
+    def __init__(self, a, b, out_path, params):
+        super().__init__()
+        self.a = a
+        self.b = b
+        self.out_path = out_path
+        self.params = params
+        self.signals = WorkerSignals()
+
+    def run(self):
+        try:
+            code = run_outline_core(
+                self.a,
+                self.b,
+                self.out_path,
+                self.params['fuzz'],
+                self.params['thick'],
+                self.params['del_color_bgr'],
+                self.params['add_color_bgr'],
+                self.params['match_tolerance'],
+                self.params['match_color_bgr'],
+                self.params['gamma'],
+                self.params['morph_open'],
+                self.params['min_area'],
+                self.params['debug'],
+                self.params['use_ssim'],
+                self.params['output_dir'],
+            )
+            self.signals.finished.emit(self.params['out_name'], str(self.out_path), code, "")
+        except Exception as e:
+            self.signals.finished.emit(self.params['out_name'], str(self.out_path), -1, str(e))
+
 def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_color_bgr,
                      match_tolerance, match_color_bgr, gamma, morph_open, min_area,
                      debug, use_ssim, output_dir):
@@ -894,6 +930,18 @@ class MainWindow(QMainWindow):
         self.alignment_control_panel = None  # Будет создан при инициализации UI
         
         print('step 2')
+        # Пул потоков для параллельной обработки
+        self.threadpool = QThreadPool.globalInstance()
+        try:
+            import os as _os
+            self.threadpool.setMaxThreadCount(max(1, min((_os.cpu_count() or 4), 8)))
+        except Exception:
+            pass
+        self.batch_total = 0
+        self.batch_done = 0
+        self.batch_ok = 0
+        self.batch_equal = 0
+        self.batch_err = 0
         # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
         self.radio_sel = QRadioButton("Сравнить только выделенные")
@@ -937,7 +985,7 @@ class MainWindow(QMainWindow):
                 background: #f57c00;
             }
         """)
-        self.compare_btn.clicked.connect(self.compare)
+        self.compare_btn.clicked.connect(self.compare_parallel)
         self.result_table = QTableWidget(0, 3)
         self.result_table.setHorizontalHeaderLabels(["Имя", "Статус", ""])
         self.result_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -2018,6 +2066,139 @@ class MainWindow(QMainWindow):
         self.result_table.setItem(row, 0, QTableWidgetItem(name))
         self.result_table.setItem(row, 1, QTableWidgetItem(status))
         self.result_table.setItem(row, 2, QTableWidgetItem(path))
+
+    def _ensure_result_row(self, name: str, path: str) -> int:
+        for r in range(self.result_table.rowCount()):
+            item = self.result_table.item(r, 0)
+            if item and item.text() == name:
+                if not self.result_table.item(r, 2):
+                    self.result_table.setItem(r, 2, QTableWidgetItem(path))
+                return r
+        r = self.result_table.rowCount()
+        self.result_table.insertRow(r)
+        self.result_table.setItem(r, 0, QTableWidgetItem(name))
+        self.result_table.setItem(r, 1, QTableWidgetItem(""))
+        self.result_table.setItem(r, 2, QTableWidgetItem(path))
+        return r
+
+    def compare_parallel(self):
+        files_a = self.grp_a.selected_files() if self.radio_sel.isChecked() else self.grp_a.all_files()
+        files_b = self.grp_b.selected_files() if self.radio_sel.isChecked() else self.grp_b.all_files()
+        if len(files_a) != len(files_b) or not files_a:
+            QMessageBox.warning(self, "Несовпадение выбора", "Выберите одинаковое число файлов в обоих списках.")
+            return
+        if not self.output_dir:
+            QMessageBox.warning(self, "Нет папки вывода", "Укажите директорию для результатов.")
+            return
+
+        import os as _os
+        import gc
+
+        self.batch_total = len(files_a)
+        self.batch_done = 0
+        self.batch_ok = 0
+        self.batch_equal = 0
+        self.batch_err = 0
+
+        self.progress_bar.setMaximum(self.batch_total)
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        self.compare_btn.setEnabled(False)
+
+        exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+        all_result_files = [
+            str(Path(self.output_dir) / f)
+            for f in sorted(_os.listdir(self.output_dir))
+            if Path(f).suffix.lower() in exts
+        ]
+        self.result_table.setRowCount(0)
+        for f in all_result_files:
+            name = _os.path.basename(f)
+            self._ensure_result_row(name, f)
+
+        fuzz = self.fuzz_spin.value()
+        thick = self.thick_spin.value()
+        match_tolerance = self.match_tolerance_spin.value()
+        gamma = self.gamma_spin.value()
+        morph_open = self.noise_chk.isChecked()
+        min_area = self.min_area_spin.value()
+        debug = self.debug_chk.isChecked()
+        use_ssim = self.ssim_chk.isChecked()
+        del_color_bgr = (self.color.blue(), self.color.green(), self.color.red())
+        add_color_bgr = (self.add_color.blue(), self.add_color.green(), self.add_color.red())
+        match_color_bgr = (self.match_color.blue(), self.match_color.green(), self.match_color.red())
+
+        for a, b in zip(files_a, files_b):
+            out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
+            out_path = Path(self.output_dir) / out_name
+            self._ensure_result_row(out_name, str(out_path))
+            self.progress_bar.setFormat(f"Обработка: {Path(a).name} vs {Path(b).name}")
+            params = {
+                'fuzz': fuzz,
+                'thick': thick,
+                'match_tolerance': match_tolerance,
+                'gamma': gamma,
+                'morph_open': morph_open,
+                'min_area': min_area,
+                'debug': debug,
+                'use_ssim': use_ssim,
+                'del_color_bgr': del_color_bgr,
+                'add_color_bgr': add_color_bgr,
+                'match_color_bgr': match_color_bgr,
+                'output_dir': self.output_dir,
+                'out_name': out_name,
+            }
+            worker = CompareWorker(a, b, out_path, params)
+            worker.signals.finished.connect(self._on_worker_finished)
+            self.threadpool.start(worker)
+
+    def _on_worker_finished(self, out_name: str, out_path: str, code: int, error_message: str):
+        if code == 1:
+            status = "OK"
+            self.batch_ok += 1
+        elif code == 0:
+            status = "Equal"
+            self.batch_equal += 1
+        else:
+            status = f"Error{(': ' + error_message) if error_message else ''}"
+            self.batch_err += 1
+
+        row = self._ensure_result_row(out_name, out_path)
+        self.result_table.setItem(row, 1, QTableWidgetItem(status))
+
+        self.batch_done += 1
+        self.progress_bar.setValue(self.batch_done)
+        QApplication.processEvents()
+
+        if self.batch_done >= self.batch_total:
+            self.progress_bar.hide()
+            self.progress_bar.setFormat("")
+            gc.collect()
+            message = (
+                "Сравнение завершено!\n\n"
+                f"Обработано пар: {self.batch_total}\n"
+                f"Успешно: {self.batch_ok}\n"
+                f"Равны: {self.batch_equal}\n"
+                f"Ошибки: {self.batch_err}\n\n"
+                f"Результаты: {self.output_dir}"
+            )
+            QMessageBox.information(self, "Сравнение завершено", message)
+            self.compare_btn.setEnabled(True)
+            self.update_save_button_state()
+
+    def _ensure_result_row(self, name: str, path: str) -> int:
+        for r in range(self.result_table.rowCount()):
+            item = self.result_table.item(r, 0)
+            if item and item.text() == name:
+                if not self.result_table.item(r, 2):
+                    self.result_table.setItem(r, 2, QTableWidgetItem(path))
+                return r
+        r = self.result_table.rowCount()
+        self.result_table.insertRow(r)
+        self.result_table.setItem(r, 0, QTableWidgetItem(name))
+        self.result_table.setItem(r, 1, QTableWidgetItem(""))
+        self.result_table.setItem(r, 2, QTableWidgetItem(path))
+        return r
 
     def run_outline(self, left, right, out_path, fuzz, thick, color_hex, match_tolerance, match_color):
         old = fast_cv2_imread(str(left))
