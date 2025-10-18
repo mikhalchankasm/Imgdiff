@@ -184,6 +184,8 @@ class CompareWorker(QRunnable):
                 self.params.get('quick_ratio_threshold', 0.001),
                 self.params.get('quick_max_side', 256),
                 self.params.get('auto_png', False),
+                self.params.get('auto_align', False),
+                self.params.get('auto_align_max_percent', 1.0),
                 5,
             )
             duration_s = max(0.0, time.perf_counter() - start_t)
@@ -199,6 +201,8 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
                      quick_ratio_threshold: float = 0.001,
                      quick_max_side: int = 256,
                      auto_png: bool = False,
+                     auto_align: bool = False,
+                     auto_align_max_percent: float = 1.0,
                      quick_absdiff_thr: int = 5):
     """Потокобезопасное сравнение пары изображений с сохранением результата.
     Возвращает 1 если есть отличия, 0 если равны.
@@ -216,9 +220,22 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
     if new.shape[:2] != (h, w):
         new = cv2.resize(new, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
-    # Быстрый ранний фильтр на даунскейле
+        # Быстрый pre-check отличий + опциональное авто-выравнивание (малые сдвиги)
     try:
         ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=quick_absdiff_thr)
+        if auto_align and (ratio >= quick_ratio_threshold) and (ratio <= (auto_align_max_percent / 100.0)):
+            try:
+                old_gray = cv2.cvtColor(old, cv2.COLOR_BGR2GRAY)
+                new_gray = cv2.cvtColor(new, cv2.COLOR_BGR2GRAY)
+                old_f = old_gray.astype(np.float32) / 255.0
+                new_f = new_gray.astype(np.float32) / 255.0
+                warp = np.eye(2, 3, dtype=np.float32)
+                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-4)
+                cv2.findTransformECC(old_f, new_f, warp, cv2.MOTION_TRANSLATION, criteria)
+                new = cv2.warpAffine(new, warp, (new.shape[1], new.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(255,255,255))
+                ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=quick_absdiff_thr)
+            except Exception:
+                pass
         if ratio < quick_ratio_threshold:
             del old, new
             return 0
@@ -227,7 +244,14 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
 
     if use_fast_core and FAST_CORE_AVAILABLE:
         # Coarse-to-fine mask с локальным уточнением
-        boxes = coarse_to_fine(old, new, fuzz=max(3, int(fuzz)), scale=0.25, min_area=max(10, int(min_area/2)), use_lab=True)
+        area = h * w
+        if area >= 20000000:
+            c_scale = 0.15
+        elif area >= 5000000:
+            c_scale = 0.25
+        else:
+            c_scale = 0.33
+        boxes = coarse_to_fine(old, new, fuzz=max(3, int(fuzz)), scale=c_scale, min_area=max(10, int(min_area/2)), use_lab=True)
         if not boxes:
             del old, new
             return 0
@@ -287,8 +311,8 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
         # Запись результата
         if (diff_pixels > 0) or (not save_only_diffs):
             comp = int(png_compression)
-            if auto_png and H > 0 and W > 0:
-                ratio = diff_pixels / float(H * W)
+            if auto_png:
+                ratio = diff_pixels / float(h * w) if (h > 0 and w > 0) else 0.0
                 if ratio > 0.05:
                     comp = 1
                 elif ratio > 0.005:
@@ -876,10 +900,33 @@ class SliderReveal(QWidget):
             color_a = main_window.color
             color_b = main_window.add_color
             color_match = main_window.match_color
+        # Режим и параметры оверлея
+        mode_text = 'Fill'
+        contour_thick = 2
+        heat_alpha = 0.6
+        cmap_name = 'JET'
+        try:
+            if hasattr(self, 'overlay_mode'):
+                mode_text = str(self.overlay_mode)
+            elif hasattr(main_window, 'overlay_mode_combo'):
+                mode_text = str(main_window.overlay_mode_combo.currentText())
+            if hasattr(self, 'contour_thick'):
+                contour_thick = int(self.contour_thick)
+            elif hasattr(main_window, 'contour_thick_spin'):
+                contour_thick = int(main_window.contour_thick_spin.value())
+            if hasattr(self, 'heatmap_alpha'):
+                heat_alpha = float(self.heatmap_alpha)
+            elif hasattr(main_window, 'heatmap_alpha_spin'):
+                heat_alpha = float(main_window.heatmap_alpha_spin.value())
+            if hasattr(self, 'heatmap_cmap'):
+                cmap_name = str(self.heatmap_cmap)
+            elif hasattr(main_window, 'heatmap_cmap_combo'):
+                cmap_name = str(main_window.heatmap_cmap_combo.currentText())
+        except Exception:
+            pass
             
         # Создаем ключ кэша на основе ID изображений и цветов
-        cache_key = (id(self.pixmap_a), id(self.pixmap_b), 
-                    color_a.name(), color_b.name(), color_match.name())
+        cache_key = (id(self.pixmap_a), id(self.pixmap_b), color_a.name(), color_b.name(), color_match.name(), str(mode_text), str(contour_thick), f'{heat_alpha:.2f}', str(cmap_name))
         if self._overlay_cache is not None and self._overlay_cache_key == cache_key:
             return self._overlay_cache
             
@@ -907,6 +954,19 @@ class SliderReveal(QWidget):
             # Конвертируем изображения в numpy массивы
             arr_a = qimage_to_np_optimized(img_a)
             arr_b = qimage_to_np_optimized(img_b)
+            # Приведение к общему холсту (паддинг меньшего до большего)
+            try:
+                ha, wa = arr_a.shape[:2]
+                hb, wb = arr_b.shape[:2]
+                H = max(ha, hb)
+                W = max(wa, wb)
+                canvas_a = np.full((H, W, 4), 255, dtype=np.uint8)
+                canvas_b = np.full((H, W, 4), 255, dtype=np.uint8)
+                canvas_a[:ha, :wa, :] = arr_a
+                canvas_b[:hb, :wb, :] = arr_b
+            except Exception:
+                canvas_a, canvas_b = arr_a, arr_b
+                       # sizes aligned by padding; skip rescale
             
             # Освобождаем память QImage объектов
             del img_a, img_b
@@ -914,37 +974,47 @@ class SliderReveal(QWidget):
             # ОПТИМИЗАЦИЯ: Векторизованные операции вместо циклов
             # Создаем маски не-белых пикселей за одну операцию
             # Используем numpy операции для ускорения
-            mask_a = np.any(arr_a[:, :, :3] < 250, axis=2)  # Любой канал < 250 = не белый
-            mask_b = np.any(arr_b[:, :, :3] < 250, axis=2)
-            
-            # Создаем результат с белым фоном за одну операцию
-            out = np.zeros_like(arr_a)
-            
-            # ИСПРАВЛЕНИЕ: Используем цвета из настроек вместо жестко заданных
-            # Получаем цвета из настроек и конвертируем в RGB
+                        # Формирование overlay в выбранном режиме
             color_a_rgb = [color_a.red(), color_a.green(), color_a.blue()]
             color_b_rgb = [color_b.red(), color_b.green(), color_b.blue()]
             color_match_rgb = [color_match.red(), color_match.green(), color_match.blue()]
-            
-            # ОПТИМИЗАЦИЯ: Векторизованное применение цветов
-            # Применяем цвета пакетно для всех пикселей одновременно
-            
-            # Цвет из настроек для изображения A (полупрозрачный)
-            out[mask_a] = color_a_rgb + [120]  # RGBA: цвет A с alpha=120
-            
-            # Цвет добавленного только для уникальных пикселей B (не пересекающихся с A)
-            only_b = mask_b & ~mask_a  # Логическое И: B И НЕ A
-            out[only_b] = color_b_rgb + [180]  # RGBA: цвет добавленного с alpha=180
-            
-            # Цвет совпадений для пересекающихся областей (A И B)
-            both = mask_a & mask_b  # Логическое И: A И B
-            out[both] = color_match_rgb + [200]  # RGBA: цвет совпадений с alpha=200
-            
-            # ОПТИМИЗАЦИЯ: Освобождаем память промежуточных массивов
-            del mask_a, mask_b, only_b, both
-            
-            # Конвертируем обратно в QImage напрямую из numpy массива
-            overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
+            out = np.zeros((H, W, 4), dtype=np.uint8)
+            mode_l = str(mode_text).strip().lower()
+            if mode_l == 'contours':
+                gray_a = cv2.cvtColor(canvas_a, cv2.COLOR_RGBA2GRAY)
+                gray_b = cv2.cvtColor(canvas_b, cv2.COLOR_RGBA2GRAY)
+                ad = cv2.absdiff(gray_a, gray_b)
+                _, diff_bin = cv2.threshold(ad, 10, 255, cv2.THRESH_BINARY)
+                k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                edges = cv2.morphologyEx(diff_bin, cv2.MORPH_GRADIENT, k)
+                if contour_thick > 1:
+                    k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (max(1, contour_thick), max(1, contour_thick)))
+                    edges = cv2.dilate(edges, k2)
+                mask_e = edges > 0
+                out[mask_e, :3] = color_match_rgb
+                out[mask_e, 3] = 200
+            elif mode_l == 'heatmap':
+                gray_a = cv2.cvtColor(canvas_a, cv2.COLOR_RGBA2GRAY)
+                gray_b = cv2.cvtColor(canvas_b, cv2.COLOR_RGBA2GRAY)
+                ad = cv2.absdiff(gray_a, gray_b)
+                cmap_code = getattr(cv2, f'COLORMAP_{cmap_name}', cv2.COLORMAP_JET)
+                try:
+                    cm = cv2.applyColorMap(ad, cmap_code)
+                except Exception:
+                    cm = cv2.applyColorMap(ad, cv2.COLORMAP_JET)
+                out[..., :3] = cm
+                alpha_val = int(max(0.0, min(1.0, heat_alpha)) * 255)
+                out[..., 3] = 0
+                nz = ad > 0
+                out[nz, 3] = alpha_val
+            else:
+                mask_a = np.any(canvas_a[:, :, :3] < 250, axis=2)
+                mask_b = np.any(canvas_b[:, :, :3] < 250, axis=2)
+                out[mask_a] = color_a_rgb + [120]
+                only_b = mask_b & ~mask_a
+                out[only_b] = color_b_rgb + [180]
+                both = mask_a & mask_b
+                out[both] = color_match_rgb + [200]overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
             
             # Освобождаем numpy массив
             del out
@@ -1314,6 +1384,11 @@ class MainWindow(QMainWindow):
         self.png_compression_spin.setValue(1)
         self.png_compression_spin.setToolTip("PNG compression (0=быстрее, 9=меньше)")
         self.png_compression_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        # Auto PNG compression toggle
+        self.auto_png_chk = QCheckBox("Auto PNG compression")
+        self.auto_png_chk.setChecked(True)
+        self.auto_png_chk.setToolTip("Автовыбор уровня сжатия по площади отличий (быстрее при больших различиях)")
+        self.auto_png_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.quick_ratio_spin = QDoubleSpinBox()
         self.quick_ratio_spin.setRange(0.0, 100.0)
         self.quick_ratio_spin.setSingleStep(0.05)
@@ -1326,6 +1401,18 @@ class MainWindow(QMainWindow):
         self.quick_max_side_spin.setValue(256)
         self.quick_max_side_spin.setToolTip("Макс. сторона для быстрого даунскейла")
         self.quick_max_side_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        # Auto-align controls
+        self.auto_align_chk = QCheckBox("Auto-align small shifts")
+        self.auto_align_chk.setChecked(False)
+        self.auto_align_chk.setToolTip("Автовыравнивание при малых отличиях (ECC, только сдвиг)")
+        self.auto_align_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.auto_align_max_spin = QDoubleSpinBox()
+        self.auto_align_max_spin.setRange(0.0, 5.0)
+        self.auto_align_max_spin.setSingleStep(0.1)
+        self.auto_align_max_spin.setValue(1.0)
+        self.auto_align_max_spin.setSuffix(" %")
+        self.auto_align_max_spin.setToolTip("Порог включения авто-выравнивания: до X% отличий (pre-check)")
+        self.auto_align_max_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 32)
         try:
@@ -1339,8 +1426,11 @@ class MainWindow(QMainWindow):
         param_form.addRow("Fast core", self.fast_core_chk)
         param_form.addRow("Save only diffs", self.save_only_diffs_chk)
         param_form.addRow("PNG compression", self.png_compression_spin)
+        param_form.addRow("Auto PNG compression", self.auto_png_chk)
         param_form.addRow("Quick pre-check (%)", self.quick_ratio_spin)
         param_form.addRow("Quick max side", self.quick_max_side_spin)
+        param_form.addRow("Auto-align", self.auto_align_chk)
+        param_form.addRow("Auto-align up to (%)", self.auto_align_max_spin)
         param_form.addRow("Workers", self.workers_spin)
         param_group.setMaximumWidth(350)
         # --- 📚 Пояснения отдельным блоком ---
@@ -1733,10 +1823,36 @@ class MainWindow(QMainWindow):
         self.slider_control = QHBoxLayout()
         self.overlay_chk = QCheckBox("Overlay")
         self.overlay_chk.setChecked(False)
-        self.overlay_chk.setToolTip("Включить режим наложения (A=красный, B=зелёный)")
+        self.overlay_chk.setToolTip("Включить режим наложения (A=красный, B=синий)")
         self.overlay_chk.stateChanged.connect(self.update_slider_overlay_mode)
+        # Режим оверлея и параметры
+        self.overlay_mode_combo = QComboBox()
+        self.overlay_mode_combo.addItems(["Fill", "Contours", "Heatmap"])
+        self.overlay_mode_combo.setCurrentText("Fill")
+        self.overlay_mode_combo.setToolTip("Режим оверлея: заливка, контуры или тепловая карта")
+        self.contour_thick_spin = QSpinBox()
+        self.contour_thick_spin.setRange(1, 12)
+        self.contour_thick_spin.setValue(2)
+        self.contour_thick_spin.setToolTip("Толщина контура (px)")
+        self.heatmap_alpha_spin = QDoubleSpinBox()
+        self.heatmap_alpha_spin.setRange(0.0, 1.0)
+        self.heatmap_alpha_spin.setSingleStep(0.05)
+        self.heatmap_alpha_spin.setValue(0.6)
+        self.heatmap_alpha_spin.setToolTip("Прозрачность heatmap (0..1)")
+        self.heatmap_cmap_combo = QComboBox()
+        self.heatmap_cmap_combo.addItems(["JET", "TURBO", "VIRIDIS"])
+        self.heatmap_cmap_combo.setCurrentText("JET")
+        self.heatmap_cmap_combo.setToolTip("Цветовая карта heatmap")
         
         # Кнопка "Вписать всё"
+                # Добавляем элементы управления в панель
+        self.slider_control.addWidget(self.overlay_chk)
+        self.slider_control.addWidget(self.overlay_mode_combo)
+        self.slider_control.addWidget(QLabel("t:"))
+        self.slider_control.addWidget(self.contour_thick_spin)
+        self.slider_control.addWidget(QLabel("α:"))
+        self.slider_control.addWidget(self.heatmap_alpha_spin)
+        self.slider_control.addWidget(self.heatmap_cmap_combo)
         self.fit_to_window_btn = QPushButton("🔍 Вписать всё")
         self.fit_to_window_btn.setToolTip("Вписать изображение в окно целиком")
         self.fit_to_window_btn.setStyleSheet("""
@@ -1885,6 +2001,14 @@ class MainWindow(QMainWindow):
         self.slider_reveal = SliderReveal(QPixmap(), QPixmap())
         self.slider_layout.addWidget(self.slider_reveal, 1)
         self.slider_reveal.setVisible(True)
+        # Обновлять overlay при смене режимов/параметров
+        try:
+            self.overlay_mode_combo.currentIndexChanged.connect(self.slider_reveal.invalidate_overlay_cache)
+            self.contour_thick_spin.valueChanged.connect(self.slider_reveal.invalidate_overlay_cache)
+            self.heatmap_alpha_spin.valueChanged.connect(self.slider_reveal.invalidate_overlay_cache)
+            self.heatmap_cmap_combo.currentIndexChanged.connect(self.slider_reveal.invalidate_overlay_cache)
+        except Exception:
+            pass
         
         # Добавляем панель управления смещением (временно скрыта)
         if self.output_dir:
@@ -2351,12 +2475,15 @@ class MainWindow(QMainWindow):
         use_fast_core = True if not hasattr(self, 'fast_core_chk') else self.fast_core_chk.isChecked()
         save_only_diffs = True if not hasattr(self, 'save_only_diffs_chk') else self.save_only_diffs_chk.isChecked()
         png_compression = 1 if not hasattr(self, 'png_compression_spin') else int(self.png_compression_spin.value())
+        auto_png = True if not hasattr(self, 'auto_png_chk') else self.auto_png_chk.isChecked()
         quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
         quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
+        auto_align = False if not hasattr(self, 'auto_align_chk') else self.auto_align_chk.isChecked()
+        auto_align_max_percent = 1.0 if not hasattr(self, 'auto_align_max_spin') else float(self.auto_align_max_spin.value())
 
         # Пройти пары: сначала кеш‑хиты, потом запуск задач
-        for a, b in zip(files_a, files_b):
-            out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
+        for _a, _b in []:
+            out_name = f""
             out_path = Path(self.output_dir) / out_name
             self._ensure_result_row(out_name, str(out_path))
             self.progress_bar.setFormat(f"��ࠡ�⪠: {Path(a).name} vs {Path(b).name}")
@@ -2423,8 +2550,11 @@ class MainWindow(QMainWindow):
                 'use_fast_core': use_fast_core,
                 'save_only_diffs': save_only_diffs,
                 'png_compression': png_compression,
+                'auto_png': auto_png,
                 'quick_ratio_threshold': quick_ratio_threshold,
                 'quick_max_side': quick_max_side,
+                'auto_align': auto_align,
+                'auto_align_max_percent': auto_align_max_percent,
                 'cancel_fn': (lambda: self.cancel_requested),
                 'pause_fn': (lambda: self.paused),
                 'cache_key': cache_key,
@@ -2432,37 +2562,20 @@ class MainWindow(QMainWindow):
             worker = CompareWorker(a, b, out_path, params)
             worker.signals.finished.connect(self._on_worker_finished)
             self.threadpool.start(worker)
-
-        for a, b in zip(files_a, files_b):
-            out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
-            out_path = Path(self.output_dir) / out_name
-            self._ensure_result_row(out_name, str(out_path))
-            self.progress_bar.setFormat(f"Обработка: {Path(a).name} vs {Path(b).name}")
-            params = {
-                'fuzz': fuzz,
-                'thick': thick,
-                'match_tolerance': match_tolerance,
-                'gamma': gamma,
-                'morph_open': morph_open,
-                'min_area': min_area,
-                'debug': debug,
-                'use_ssim': use_ssim,
-                'del_color_bgr': del_color_bgr,
-                'add_color_bgr': add_color_bgr,
-                'match_color_bgr': match_color_bgr,
-                'output_dir': self.output_dir,
-                'out_name': out_name,
-                'use_fast_core': use_fast_core,
-                'save_only_diffs': save_only_diffs,
-                'png_compression': png_compression,
-                'quick_ratio_threshold': quick_ratio_threshold,
-                'quick_max_side': quick_max_side,
-            }
-            worker = CompareWorker(a, b, out_path, params)
-            worker.signals.finished.connect(self._on_worker_finished)
-            self.threadpool.start(worker)
+        # duplicate launch loop removed to avoid double-running tasks
 
     def _on_worker_finished(self, out_name: str, out_path: str, code: int, error_message: str, duration_s: float = 0.0):
+        # Persist result to cache if key is known
+        try:
+            cache_key = getattr(self, '_cache_map', {}).get(out_name)
+            if cache_key:
+                self.result_cache.put(cache_key, {
+                    'code': int(code),
+                    'duration_s': float(duration_s),
+                    'out_path': str(out_path),
+                })
+        except Exception:
+            pass
         if code == 1:
             status = "OK"
             self.batch_ok += 1
@@ -2580,7 +2693,23 @@ class MainWindow(QMainWindow):
         )
         
         # Сохраняем с оптимальным сжатием для уменьшения размера файла
-        success = cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        comp = 1
+        try:
+            if hasattr(self, 'png_compression_spin'):
+                comp = int(self.png_compression_spin.value())
+            if hasattr(self, 'auto_png_chk') and self.auto_png_chk.isChecked():
+                total_px = int(meta.get('total_pixels') or (overlay.shape[0] * overlay.shape[1]))
+                diff_px = int(meta.get('diff_pixels', 0))
+                ratio = (float(diff_px) / float(total_px)) if total_px > 0 else 0.0
+                if ratio > 0.05:
+                    comp = 1
+                elif ratio > 0.005:
+                    comp = 2
+                else:
+                    comp = 4
+        except Exception:
+            pass
+        success = cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, comp])
         if not success:
             raise Exception(f"Не удалось сохранить результат в {out_path}")
         
@@ -2886,7 +3015,13 @@ class MainWindow(QMainWindow):
         try:
             self.settings.setValue("fast_core", self.fast_core_chk.isChecked())
             self.settings.setValue("save_only_diffs", self.save_only_diffs_chk.isChecked())
-            self.settings.setValue("png_compression", int(self.png_compression_spin.value()))
+            self.settings.setValue("png_compression", int(self.png_compression_spin.value()))\n            self.settings.setValue("overlay_mode", getattr(self.overlay_mode_combo, "currentText", lambda: "Fill")())\n            self.settings.setValue("contour_thick", int(self.contour_thick_spin.value()))\n            self.settings.setValue("heatmap_alpha", float(self.heatmap_alpha_spin.value()))\n            self.settings.setValue("heatmap_cmap", getattr(self.heatmap_cmap_combo, "currentText", lambda: "JET")())
+            if hasattr(self, 'auto_png_chk'):
+                self.settings.setValue("auto_png", self.auto_png_chk.isChecked())
+            if hasattr(self, 'auto_align_chk'):
+                self.settings.setValue("auto_align", self.auto_align_chk.isChecked())
+            if hasattr(self, 'auto_align_max_spin'):
+                self.settings.setValue("auto_align_max_percent", float(self.auto_align_max_spin.value()))
             self.settings.setValue("quick_ratio_percent", float(self.quick_ratio_spin.value()))
             self.settings.setValue("quick_max_side", int(self.quick_max_side_spin.value()))
             self.settings.setValue("workers", int(self.workers_spin.value()))
@@ -2969,6 +3104,15 @@ class MainWindow(QMainWindow):
             png_compression = self.settings.value("png_compression")
             if png_compression and hasattr(self, 'png_compression_spin'):
                 self.png_compression_spin.setValue(int(png_compression))
+            auto_png = self.settings.value("auto_png")
+            if auto_png is not None and hasattr(self, 'auto_png_chk'):
+                self.auto_png_chk.setChecked(auto_png == "true" or auto_png is True)\n            ov_mode = self.settings.value("overlay_mode")\n            if ov_mode and hasattr(self, "overlay_mode_combo"):\n                idx = self.overlay_mode_combo.findText(str(ov_mode))\n                if idx >= 0: self.overlay_mode_combo.setCurrentIndex(idx)\n            contour_thick = self.settings.value("contour_thick")\n            if contour_thick and hasattr(self, "contour_thick_spin"): self.contour_thick_spin.setValue(int(contour_thick))\n            heat_alpha = self.settings.value("heatmap_alpha")\n            if heat_alpha and hasattr(self, "heatmap_alpha_spin"): self.heatmap_alpha_spin.setValue(float(heat_alpha))\n            heat_cmap = self.settings.value("heatmap_cmap")\n            if heat_cmap and hasattr(self, "heatmap_cmap_combo"):\n                idx2 = self.heatmap_cmap_combo.findText(str(heat_cmap))\n                if idx2 >= 0: self.heatmap_cmap_combo.setCurrentIndex(idx2)
+            auto_align = self.settings.value("auto_align")
+            if auto_align is not None and hasattr(self, 'auto_align_chk'):
+                self.auto_align_chk.setChecked(auto_align == "true" or auto_align is True)
+            auto_align_max_percent = self.settings.value("auto_align_max_percent")
+            if auto_align_max_percent and hasattr(self, 'auto_align_max_spin'):
+                self.auto_align_max_spin.setValue(float(auto_align_max_percent))
             quick_ratio_percent = self.settings.value("quick_ratio_percent")
             if quick_ratio_percent and hasattr(self, 'quick_ratio_spin'):
                 self.quick_ratio_spin.setValue(float(quick_ratio_percent))
@@ -3132,8 +3276,15 @@ class MainWindow(QMainWindow):
                 img_b = QPixmap.fromImage(cv2_to_qimage(img_b_cv))
                 
                 # Создаем временный SliderReveal для генерации overlay в полном разрешении
-                temp_slider = SliderReveal(img_a, img_b)
-                temp_slider.setOverlayMode(True)
+                temp_slider = SliderReveal(img_a, img_b, parent=self)
+                # Прокинем актуальные цвета из настроек, чтобы совпадали с Overlay на экране
+                try:
+                    temp_slider.color = self.color
+                    temp_slider.add_color = self.add_color
+                    temp_slider.match_color = self.match_color
+                except Exception:
+                    pass
+                temp_slider.setOverlayMode(True)\n                try:\n                    temp_slider.overlay_mode = self.overlay_mode_combo.currentText()\n                    temp_slider.contour_thick = int(self.contour_thick_spin.value())\n                    temp_slider.heatmap_alpha = float(self.heatmap_alpha_spin.value())\n                    temp_slider.heatmap_cmap = self.heatmap_cmap_combo.currentText()\n                except Exception:\n                    pass
                 
                 # Генерируем overlay в полном разрешении
                 overlay_qimage = temp_slider._generate_overlay_cache()
@@ -3141,8 +3292,18 @@ class MainWindow(QMainWindow):
                 if overlay_qimage is None:
                     raise Exception("Не удалось сгенерировать overlay")
 
-                # Сохраняем в файл
-                success = overlay_qimage.save(str(out_path), "PNG")
+                # Компонируем overlay поверх базового изображения (B) на белом фоне
+                base_img = img_b.toImage()
+                # Создаём холст под размер overlay
+                composed = QImage(overlay_qimage.size(), QImage.Format_ARGB32)
+                composed.fill(Qt.white)
+                painter = QPainter(composed)
+                try:
+                    painter.drawImage(0, 0, base_img)
+                    painter.drawImage(0, 0, overlay_qimage)
+                finally:
+                    painter.end()
+                success = composed.save(str(out_path), "PNG")
                 
                 if not success:
                     raise Exception(f"Не удалось сохранить файл: {out_path}")
@@ -4536,6 +4697,30 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
