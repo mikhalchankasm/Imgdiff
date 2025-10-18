@@ -182,6 +182,7 @@ class CompareWorker(QRunnable):
                 self.params.get('png_compression', 1),
                 self.params.get('quick_ratio_threshold', 0.001),
                 self.params.get('quick_max_side', 256),
+                self.params.get('auto_png', False),
                 5,
             )
             duration_s = max(0.0, time.perf_counter() - start_t)
@@ -196,6 +197,7 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
                      png_compression: int = 1,
                      quick_ratio_threshold: float = 0.001,
                      quick_max_side: int = 256,
+                     auto_png: bool = False,
                      quick_absdiff_thr: int = 5):
     """Потокобезопасное сравнение пары изображений с сохранением результата.
     Возвращает 1 если есть отличия, 0 если равны.
@@ -283,7 +285,16 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
 
         # Запись результата
         if (diff_pixels > 0) or (not save_only_diffs):
-            cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, int(png_compression)])
+            comp = int(png_compression)
+            if auto_png and H > 0 and W > 0:
+                ratio = diff_pixels / float(H * W)
+                if ratio > 0.05:
+                    comp = 1
+                elif ratio > 0.005:
+                    comp = 2
+                else:
+                    comp = 4
+            cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, comp])
         del old, new, overlay
         return 1
 
@@ -309,7 +320,19 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
     )
 
     if (meta.get('diff_pixels', 0) > 0) or (not save_only_diffs):
-        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, int(png_compression)])
+        comp = int(png_compression)
+        if auto_png and meta.get('total_pixels', 0):
+            try:
+                ratio = float(meta['diff_pixels']) / float(meta['total_pixels'])
+                if ratio > 0.05:
+                    comp = 1
+                elif ratio > 0.005:
+                    comp = 2
+                else:
+                    comp = 4
+            except Exception:
+                pass
+        cv2.imwrite(str(out_path), overlay, [cv2.IMWRITE_PNG_COMPRESSION, comp])
 
     del old, new, overlay
     return 1 if meta.get('diff_pixels', 0) > 0 else 0
@@ -1163,7 +1186,8 @@ class MainWindow(QMainWindow):
         ctl_row.addWidget(self.compare_btn)
         ctl_row.addWidget(self.pause_btn)
         ctl_row.addWidget(self.stop_btn)
-        result_col.addLayout(ctl_row)
+        # Строку клавиш показываем также в верхней панели; здесь можно не добавлять
+        # result_col.addLayout(ctl_row)
         results_label = QLabel("📊 Результаты:")
         results_label.setStyleSheet("""
             QLabel {
@@ -1903,6 +1927,13 @@ class MainWindow(QMainWindow):
         # Добавляем кнопку скрытия/показа панелей в верхнюю часть
         top_controls = QHBoxLayout()
         top_controls.addWidget(self.toggle_folders_btn)
+        # Дублировать основные кнопки управления батчем в верхней панели для видимости
+        try:
+            top_controls.addWidget(self.compare_btn)
+            top_controls.addWidget(self.pause_btn)
+            top_controls.addWidget(self.stop_btn)
+        except Exception:
+            pass
         top_controls.addStretch(1)
         main_layout.addLayout(top_controls)
         
