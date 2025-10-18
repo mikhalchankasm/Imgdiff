@@ -940,7 +940,7 @@ class SliderReveal(QWidget):
             out[both] = color_match_rgb + [200]  # RGBA: цвет совпадений с alpha=200
             
             # ОПТИМИЗАЦИЯ: Освобождаем память промежуточных массивов
-            del arr_a, arr_b, mask_a, mask_b, only_b, both
+            del mask_a, mask_b, only_b, both, canvas_a, canvas_b
             
             # Конвертируем обратно в QImage напрямую из numpy массива
             overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
@@ -4533,6 +4533,7 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
 
 
 
