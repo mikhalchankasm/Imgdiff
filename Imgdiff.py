@@ -918,7 +918,7 @@ class SliderReveal(QWidget):
             mask_b = np.any(arr_b[:, :, :3] < 250, axis=2)
             
             # Создаем результат с белым фоном за одну операцию
-            out = np.full_like(arr_a, 255)
+            out = np.zeros_like(arr_a)
             
             # ИСПРАВЛЕНИЕ: Используем цвета из настроек вместо жестко заданных
             # Получаем цвета из настроек и конвертируем в RGB
@@ -941,7 +941,7 @@ class SliderReveal(QWidget):
             out[both] = color_match_rgb + [200]  # RGBA: цвет совпадений с alpha=200
             
             # ОПТИМИЗАЦИЯ: Освобождаем память промежуточных массивов
-            del mask_a, mask_b, only_b, both, canvas_a, canvas_b
+            del mask_a, mask_b, only_b, both
             
             # Конвертируем обратно в QImage напрямую из numpy массива
             overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
@@ -986,6 +986,8 @@ class SliderReveal(QWidget):
             # Overlay режим с кэшированием
             overlay = self._generate_overlay_cache()
             if overlay is not None:
+                # Сначала базовая картинка, затем полупрозрачный слой
+                qp.drawPixmap(0, 0, self.pixmap_b)
                 qp.drawImage(0, 0, overlay)
         qp.end()
 
@@ -4534,6 +4536,8 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
 
 
 
