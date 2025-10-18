@@ -1,5 +1,6 @@
 import os
 import time
+import gc
 import sys
 import shutil
 import logging
@@ -4533,6 +4534,7 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
 
 
 
