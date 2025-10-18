@@ -844,7 +844,6 @@ class SliderReveal(QWidget):
         self.pixmap_a = pixmap_a
         self.pixmap_b = pixmap_b
         self.slider_pos = 0.5
-        self.overlay_mode = False
         self.scale = 1.0
         self.offset = QPoint(0, 0)
         self._drag = False
@@ -869,7 +868,6 @@ class SliderReveal(QWidget):
         self.update()
 
     def setOverlayMode(self, enabled):
-        self.overlay_mode = enabled
         # Инвалидируем кэш при смене режима
         self._overlay_cache = None
         self._overlay_cache_key = None
@@ -900,33 +898,9 @@ class SliderReveal(QWidget):
             color_a = main_window.color
             color_b = main_window.add_color
             color_match = main_window.match_color
-        # Режим и параметры оверлея
-        mode_text = 'Fill'
-        contour_thick = 2
-        heat_alpha = 0.6
-        cmap_name = 'JET'
-        try:
-            if hasattr(self, 'overlay_mode'):
-                mode_text = str(self.overlay_mode)
-            elif hasattr(main_window, 'overlay_mode_combo'):
-                mode_text = str(main_window.overlay_mode_combo.currentText())
-            if hasattr(self, 'contour_thick'):
-                contour_thick = int(self.contour_thick)
-            elif hasattr(main_window, 'contour_thick_spin'):
-                contour_thick = int(main_window.contour_thick_spin.value())
-            if hasattr(self, 'heatmap_alpha'):
-                heat_alpha = float(self.heatmap_alpha)
-            elif hasattr(main_window, 'heatmap_alpha_spin'):
-                heat_alpha = float(main_window.heatmap_alpha_spin.value())
-            if hasattr(self, 'heatmap_cmap'):
-                cmap_name = str(self.heatmap_cmap)
-            elif hasattr(main_window, 'heatmap_cmap_combo'):
-                cmap_name = str(main_window.heatmap_cmap_combo.currentText())
-        except Exception:
-            pass
+\n        # Режимы оверлея отключены: используем только заливку
             
         # Создаем ключ кэша на основе ID изображений и цветов
-        cache_key = (id(self.pixmap_a), id(self.pixmap_b), color_a.name(), color_b.name(), color_match.name(), str(mode_text), str(contour_thick), f'{heat_alpha:.2f}', str(cmap_name))
         if self._overlay_cache is not None and self._overlay_cache_key == cache_key:
             return self._overlay_cache
             
@@ -987,8 +961,6 @@ class SliderReveal(QWidget):
                 _, diff_bin = cv2.threshold(ad, 10, 255, cv2.THRESH_BINARY)
                 k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 edges = cv2.morphologyEx(diff_bin, cv2.MORPH_GRADIENT, k)
-                if contour_thick > 1:
-                    k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (max(1, contour_thick), max(1, contour_thick)))
                     edges = cv2.dilate(edges, k2)
                 mask_e = edges > 0
                 out[mask_e, :3] = color_match_rgb
@@ -1014,7 +986,8 @@ class SliderReveal(QWidget):
                 only_b = mask_b & ~mask_a
                 out[only_b] = color_b_rgb + [180]
                 both = mask_a & mask_b
-                out[both] = color_match_rgb + [200]overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
+                out[both] = color_match_rgb + [200]
+            overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
             
             # Освобождаем numpy массив
             del out
@@ -1040,7 +1013,6 @@ class SliderReveal(QWidget):
         qp.translate(self.offset)
         qp.scale(self.scale, self.scale)
         
-        if not self.overlay_mode:
             # Обычный режим слайдера
             split_x = int(self.slider_pos * self.pixmap_a.width())
             # Рисуем частями без копирования буферов
@@ -1091,7 +1063,6 @@ class SliderReveal(QWidget):
             self.offset += delta
             self._last_pos = e.pos()
             self.update()
-        elif not self._drag_mode and e.buttons() & Qt.MouseButton.LeftButton and not self.overlay_mode:
             # Преобразуем координаты мыши в координаты изображения с учетом зума и пана
             mouse_x = (e.x() - self.offset.x()) / self.scale
             if self.pixmap_a.width() > 0:
@@ -1824,35 +1795,11 @@ class MainWindow(QMainWindow):
         self.overlay_chk = QCheckBox("Overlay")
         self.overlay_chk.setChecked(False)
         self.overlay_chk.setToolTip("Включить режим наложения (A=красный, B=синий)")
-        self.overlay_chk.stateChanged.connect(self.update_slider_overlay_mode)
         # Режим оверлея и параметры
-        self.overlay_mode_combo = QComboBox()
-        self.overlay_mode_combo.addItems(["Fill", "Contours", "Heatmap"])
-        self.overlay_mode_combo.setCurrentText("Fill")
-        self.overlay_mode_combo.setToolTip("Режим оверлея: заливка, контуры или тепловая карта")
-        self.contour_thick_spin = QSpinBox()
-        self.contour_thick_spin.setRange(1, 12)
-        self.contour_thick_spin.setValue(2)
-        self.contour_thick_spin.setToolTip("Толщина контура (px)")
-        self.heatmap_alpha_spin = QDoubleSpinBox()
-        self.heatmap_alpha_spin.setRange(0.0, 1.0)
-        self.heatmap_alpha_spin.setSingleStep(0.05)
-        self.heatmap_alpha_spin.setValue(0.6)
-        self.heatmap_alpha_spin.setToolTip("Прозрачность heatmap (0..1)")
-        self.heatmap_cmap_combo = QComboBox()
-        self.heatmap_cmap_combo.addItems(["JET", "TURBO", "VIRIDIS"])
-        self.heatmap_cmap_combo.setCurrentText("JET")
-        self.heatmap_cmap_combo.setToolTip("Цветовая карта heatmap")
         
         # Кнопка "Вписать всё"
                 # Добавляем элементы управления в панель
         self.slider_control.addWidget(self.overlay_chk)
-        self.slider_control.addWidget(self.overlay_mode_combo)
-        self.slider_control.addWidget(QLabel("t:"))
-        self.slider_control.addWidget(self.contour_thick_spin)
-        self.slider_control.addWidget(QLabel("α:"))
-        self.slider_control.addWidget(self.heatmap_alpha_spin)
-        self.slider_control.addWidget(self.heatmap_cmap_combo)
         self.fit_to_window_btn = QPushButton("🔍 Вписать всё")
         self.fit_to_window_btn.setToolTip("Вписать изображение в окно целиком")
         self.fit_to_window_btn.setStyleSheet("""
@@ -1998,19 +1945,10 @@ class MainWindow(QMainWindow):
             }
         """)
         self.slider_layout.addWidget(self.diff_percentage_label)
-        self.slider_reveal = SliderReveal(QPixmap(), QPixmap())
+        self.slider_reveal = SliderReveal(QPixmap(), QPixmap(), parent=self)
         self.slider_layout.addWidget(self.slider_reveal, 1)
         self.slider_reveal.setVisible(True)
-        # Обновлять overlay при смене режимов/параметров
-        try:
-            self.overlay_mode_combo.currentIndexChanged.connect(self.slider_reveal.invalidate_overlay_cache)
-            self.contour_thick_spin.valueChanged.connect(self.slider_reveal.invalidate_overlay_cache)
-            self.heatmap_alpha_spin.valueChanged.connect(self.slider_reveal.invalidate_overlay_cache)
-            self.heatmap_cmap_combo.currentIndexChanged.connect(self.slider_reveal.invalidate_overlay_cache)
-        except Exception:
-            pass
-        
-        # Добавляем панель управления смещением (временно скрыта)
+        # overlay controls removed
         if self.output_dir:
             self.alignment_manager = ImageAlignmentManager(self.output_dir)
         else:
@@ -2728,7 +2666,6 @@ class MainWindow(QMainWindow):
         # этот метод больше не нужен, но обновляем состояние кнопок
         self.update_save_button_state()
 
-    def update_slider_overlay_mode(self):
         self.slider_reveal.setOverlayMode(self.overlay_chk.isChecked())
         # Обновляем состояние кнопок сохранения и подсветки
         self.update_save_button_state()
@@ -3015,7 +2952,7 @@ class MainWindow(QMainWindow):
         try:
             self.settings.setValue("fast_core", self.fast_core_chk.isChecked())
             self.settings.setValue("save_only_diffs", self.save_only_diffs_chk.isChecked())
-            self.settings.setValue("png_compression", int(self.png_compression_spin.value()))\n            self.settings.setValue("overlay_mode", getattr(self.overlay_mode_combo, "currentText", lambda: "Fill")())\n            self.settings.setValue("contour_thick", int(self.contour_thick_spin.value()))\n            self.settings.setValue("heatmap_alpha", float(self.heatmap_alpha_spin.value()))\n            self.settings.setValue("heatmap_cmap", getattr(self.heatmap_cmap_combo, "currentText", lambda: "JET")())
+            self.settings.setValue("png_compression", int(self.png_compression_spin.value()))
             if hasattr(self, 'auto_png_chk'):
                 self.settings.setValue("auto_png", self.auto_png_chk.isChecked())
             if hasattr(self, 'auto_align_chk'):
@@ -3106,7 +3043,9 @@ class MainWindow(QMainWindow):
                 self.png_compression_spin.setValue(int(png_compression))
             auto_png = self.settings.value("auto_png")
             if auto_png is not None and hasattr(self, 'auto_png_chk'):
-                self.auto_png_chk.setChecked(auto_png == "true" or auto_png is True)\n            ov_mode = self.settings.value("overlay_mode")\n            if ov_mode and hasattr(self, "overlay_mode_combo"):\n                idx = self.overlay_mode_combo.findText(str(ov_mode))\n                if idx >= 0: self.overlay_mode_combo.setCurrentIndex(idx)\n            contour_thick = self.settings.value("contour_thick")\n            if contour_thick and hasattr(self, "contour_thick_spin"): self.contour_thick_spin.setValue(int(contour_thick))\n            heat_alpha = self.settings.value("heatmap_alpha")\n            if heat_alpha and hasattr(self, "heatmap_alpha_spin"): self.heatmap_alpha_spin.setValue(float(heat_alpha))\n            heat_cmap = self.settings.value("heatmap_cmap")\n            if heat_cmap and hasattr(self, "heatmap_cmap_combo"):\n                idx2 = self.heatmap_cmap_combo.findText(str(heat_cmap))\n                if idx2 >= 0: self.heatmap_cmap_combo.setCurrentIndex(idx2)
+                self.auto_png_chk.setChecked(auto_png == "true" or auto_png is True)
+                if idx >= 0:
+                if idx2 >= 0:
             auto_align = self.settings.value("auto_align")
             if auto_align is not None and hasattr(self, 'auto_align_chk'):
                 self.auto_align_chk.setChecked(auto_align == "true" or auto_align is True)
@@ -3284,7 +3223,10 @@ class MainWindow(QMainWindow):
                     temp_slider.match_color = self.match_color
                 except Exception:
                     pass
-                temp_slider.setOverlayMode(True)\n                try:\n                    temp_slider.overlay_mode = self.overlay_mode_combo.currentText()\n                    temp_slider.contour_thick = int(self.contour_thick_spin.value())\n                    temp_slider.heatmap_alpha = float(self.heatmap_alpha_spin.value())\n                    temp_slider.heatmap_cmap = self.heatmap_cmap_combo.currentText()\n                except Exception:\n                    pass
+                temp_slider.setOverlayMode(True)
+                try:
+                except Exception:
+                    pass
                 
                 # Генерируем overlay в полном разрешении
                 overlay_qimage = temp_slider._generate_overlay_cache()
@@ -4697,6 +4639,8 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
 
 
 
