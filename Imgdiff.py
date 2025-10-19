@@ -447,6 +447,13 @@ class FilteredTable(QWidget):
         # 📍 Заголовок с меткой выбранной папки
         header_layout = QHBoxLayout()
         self.dir_btn = QPushButton(label)
+        try:
+            self.dir_btn.setToolTip(
+                f"Выбрать {label}.\n"
+                "Подсказка: поддерживаются PNG/JPG/TIFF; можно перетащить папку из Проводника."
+            )
+        except Exception:
+            pass
         self.dir_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         
         # 🏷️ Метка для отображения выбранного пути
@@ -467,7 +474,13 @@ class FilteredTable(QWidget):
         self.filter_combo.setEditable(True)
         self.filter_combo.setMinimumWidth(80)
         self.filter_combo.setMaximumWidth(200)
-        self.filter_combo.setToolTip("Фильтр по имени...")
+        try:
+            self.filter_combo.setToolTip(
+                "Фильтр по имени (подстрока, без * и ?).\n"
+                "Примеры: mask, .png, _v2, report_2024"
+            )
+        except Exception:
+            pass
         self.filter_combo.setDuplicatesEnabled(False)
         self.filter_combo.setMaxCount(20)
         self.filter_combo.setCurrentText("")
@@ -1118,7 +1131,17 @@ class MainWindow(QMainWindow):
         self._cache_map = {}
         # --- 🔘 Радиокнопки сравнения в QGroupBox ---
         self.radio_all = QRadioButton("Сравнить все")
+        try:
+            self.radio_all.setToolTip(
+                "Сравнить все пары файлов между A и B (по именам/сортировке)."
+            )
+        except Exception:
+            pass
         self.radio_sel = QRadioButton("Сравнить только выделенные")
+        try:
+            self.radio_sel.setToolTip("Сравнить только вручную выделенные строки в списках A и B")
+        except Exception:
+            pass
         self.radio_sel.setChecked(True)
         self.radio_group = QButtonGroup()
         self.radio_group.addButton(self.radio_all)
@@ -1145,6 +1168,13 @@ class MainWindow(QMainWindow):
         """)
         logger.debug('step 3')
         self.compare_btn = QPushButton("⚡ Сравнить")
+        try:
+            self.compare_btn.setToolTip(
+                "Запустить сравнение выбранных пар (Enter).\n"
+                "Пример: выделите одинаковое число файлов в A и B — будут созданы результаты в папке вывода."
+            )
+        except Exception:
+            pass
         self.compare_btn.setStyleSheet("""
             QPushButton {
                 background: #ff9800;
@@ -1182,6 +1212,13 @@ class MainWindow(QMainWindow):
             }
         """)
         self.out_dir_btn = QPushButton("📁 Выбрать папку вывода…")
+        try:
+            self.out_dir_btn.setToolTip(
+                "Папка, куда сохраняются diff/overlay/mask.\n"
+                "Пример: D:\\projects\\results"
+            )
+        except Exception:
+            pass
         self.out_dir_btn.setStyleSheet("""
             QPushButton {
                 background: #ff7043;
@@ -1222,9 +1259,17 @@ class MainWindow(QMainWindow):
         result_col.addWidget(radio_box)
         # Панель управления батчем
         self.pause_btn = QPushButton("Pause")
+        try:
+            self.pause_btn.setToolTip("Пауза/продолжить пакетную обработку")
+        except Exception:
+            pass
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self.toggle_pause)
         self.stop_btn = QPushButton("Stop")
+        try:
+            self.stop_btn.setToolTip("Остановить пакет (текущая пара завершится)")
+        except Exception:
+            pass
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_batch)
         ctl_row = QHBoxLayout()
@@ -1268,7 +1313,9 @@ class MainWindow(QMainWindow):
         self.color_btn.setStyleSheet("background:#FF0000")
         self.color = QColor("#FF0000")
         self.color_btn.clicked.connect(self.choose_color)
-        self.color_btn.setToolTip("Цвет контура отличий (HEX или имя, как в magick)")
+        self.color_btn.setToolTip(
+            "Цвет контура отличий (HEX или имя, как в magick).\nПримеры: #FF0000, red, #00AA00"
+        )
         self.color_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         # --- Чекбоксы вместо кнопок ---
         self.noise_chk = QCheckBox("Фильтр шума")
@@ -1290,7 +1337,9 @@ class MainWindow(QMainWindow):
         self.add_color_btn.setStyleSheet("background:#0066FF")
         self.add_color = QColor("#0066FF")
         self.add_color_btn.clicked.connect(self.choose_add_color)
-        self.add_color_btn.setToolTip("Цвет появившегося (HEX или имя)")
+        self.add_color_btn.setToolTip(
+            "Цвет появившегося (HEX или имя). Примеры: #0066FF, blue"
+        )
         self.add_color_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.debug_chk = QCheckBox("Debug mode")
         self.debug_chk.setChecked(False)
@@ -1317,7 +1366,9 @@ class MainWindow(QMainWindow):
         self.match_color_btn.setStyleSheet("background:#0000FF; color:white")
         self.match_color = QColor("#0000FF")
         self.match_color_btn.clicked.connect(self.choose_match_color)
-        self.match_color_btn.setToolTip("Цвет для 'совпадающих' линий")
+        self.match_color_btn.setToolTip(
+            "Цвет для 'совпадающих' линий. Примеры: #0000FF, royalblue"
+        )
         self.match_color_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         param_form = QFormLayout()
         param_form.addRow("Допуск (fuzz)", self.fuzz_spin)
@@ -1376,12 +1427,17 @@ class MainWindow(QMainWindow):
         self.reset_btn.setToolTip("Вернуть оптимальные значения по умолчанию")
         self.reset_btn.clicked.connect(self.reset_settings_to_defaults)
         basic_form.addRow("", self.reset_btn)
-        # Короткая памятка
+        # Короткая памятка (+ примеры)
         basic_help = QLabel(
             "<b>Как использовать:</b><br>"
             "1) Выберите папки A и B, затем папку вывода.<br>"
             "2) Включите Overlay (галочка над просмотрщиком),<br> &nbsp;&nbsp;подберите удобные цвета A/B/совпадений.<br>"
-            "3) Нажмите ‘Сравнить’. Файлы с отличиями сохраняются в вывод." )
+            "3) Нажмите ‘Сравнить’. Файлы с отличиями сохраняются в вывод.<br><br>"
+            "<b>Примеры:</b><br>"
+            "• Фильтр: .png, mask, _v2, report_2024<br>"
+            "• Цвета: #FF0000, red, #0066FF<br>"
+            "• Папка вывода: D:\\results"
+        )
         basic_help.setWordWrap(True)
         basic_form.addRow(basic_help)
         basic_group.setLayout(basic_form)
