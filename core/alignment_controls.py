@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 from typing import List, Tuple, Optional
-from .image_alignment import ImageAlignmentManager
+from core.image_alignment import ImageAlignmentManager
 
 
 class PointSelectionWidget(QWidget):

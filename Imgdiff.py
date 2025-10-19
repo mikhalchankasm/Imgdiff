@@ -10,7 +10,7 @@ try:
     cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
 except Exception:
     try:
-        import cv2.utils.logging as cvlog
+        import cv2.utils.logging as cvlog  # pylint: disable=import-error
         cvlog.setLogLevel(cvlog.LOG_LEVEL_ERROR)
     except Exception:
         pass
@@ -29,7 +29,7 @@ os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 
 # flake8: noqa: E402
 from PyQt5.QtCore import Qt, QUrl, QSettings, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QMimeData, QRect, QObject, QRunnable, QThreadPool
-from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter, QKeySequence, QDrag, QPen
+from PyQt5.QtGui import QPixmap, QDesktopServices, QColor, QImage, QPainter, QKeySequence, QDrag, QPen, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QFileDialog,
@@ -2544,8 +2544,8 @@ class MainWindow(QMainWindow):
         auto_align_max_percent = 1.0 if not hasattr(self, 'auto_align_max_spin') else float(self.auto_align_max_spin.value())
 
         # Пройти пары: сначала кеш‑хиты, потом запуск задач
-        for _a, _b in []:
-            out_name = f""
+        for i, (a, b) in enumerate(zip(files_a, files_b)):
+            out_name = f"{Path(a).stem}__vs__{Path(b).stem}_outline.png"
             out_path = Path(self.output_dir) / out_name
             self._ensure_result_row(out_name, str(out_path))
             self.progress_bar.setFormat(f"��ࠡ�⪠: {Path(a).name} vs {Path(b).name}")
@@ -4808,6 +4808,7 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
 
 
 

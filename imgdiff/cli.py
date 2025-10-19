@@ -2,6 +2,7 @@
 CLI интерфейс для imgdiff
 """
 import sys
+import argparse
 from pathlib import Path
 from typing import Optional
 
@@ -12,8 +13,6 @@ try:
     TYPER_AVAILABLE = True
 except ImportError:
     TYPER_AVAILABLE = False
-    # Fallback на argparse
-    import argparse
 
 import cv2
 import numpy as np
@@ -231,4 +230,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

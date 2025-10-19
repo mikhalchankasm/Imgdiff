@@ -4,10 +4,18 @@
 Создает простую иконку с буквой "I" на синем фоне
 """
 
-from PIL import Image, ImageDraw, ImageFont
+try:
+    from PIL import Image, ImageDraw, ImageFont  # pylint: disable=import-error
+except Exception:  # pragma: no cover
+    Image = None  # type: ignore
+    ImageDraw = None  # type: ignore
+    ImageFont = None  # type: ignore
 import os
 
 def create_icon():
+    if Image is None:
+        print("[WARN] Pillow (PIL) is not installed. Skipping icon build.")
+        return
     """Создает иконку 256x256 пикселей"""
     # Создаем изображение 256x256 с синим фоном
     size = 256

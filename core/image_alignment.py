@@ -254,3 +254,4 @@ class ImageAlignmentManager:
     def get_all_alignments(self) -> Dict[str, AlignmentSettings]:
         """Возвращает все сохраненные настройки смещения"""
         return self.settings.copy() 
+

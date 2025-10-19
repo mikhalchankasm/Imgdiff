@@ -209,3 +209,4 @@ def diff_two_color(
     
     logging.info(f"Результат: diff_pixels={meta['diff_pixels']}, matched_pixels={meta['matched_pixels']}, same_percent={meta['same_percent']:.2f}, diff_percent={meta['diff_percent']:.2f}, matched_percent={meta['matched_percent']:.2f}")
     return overlay, meta 
+

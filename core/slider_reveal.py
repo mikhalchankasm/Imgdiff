@@ -104,3 +104,4 @@ class SliderReveal(QWidget):
         self.offset = QPoint(0, 0)
         self.scale = 1.0
         self.update() 
+
