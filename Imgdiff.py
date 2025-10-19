@@ -1,3 +1,4 @@
+import warnings
 import os
 import time
 import gc
@@ -5,6 +6,14 @@ import sys
 import shutil
 import logging
 import cv2
+try:
+    cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
+except Exception:
+    try:
+        import cv2.utils.logging as cvlog
+        cvlog.setLogLevel(cvlog.LOG_LEVEL_ERROR)
+    except Exception:
+        pass
 import numpy as np
 import re
 from pathlib import Path
@@ -4743,6 +4752,7 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
 
 
 
