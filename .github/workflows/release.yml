@@ -1,9 +1,18 @@
 name: build-and-release
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v2.1.2). Leave empty to use version from pyproject.'
+        required: false
+        default: ''
 
 jobs:
   build-windows:
@@ -11,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -18,16 +29,17 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Build exe
-        shell: bash
+        shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --name Imgdiff --icon imgdiff_icon.ico Imgdiff.py
-          ls -l dist
+          python -m PyInstaller --onefile --windowed --name Imgdiff --icon imgdiff_icon.ico Imgdiff.py
+          Get-ChildItem dist | Format-Table -AutoSize
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -41,6 +53,47 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Determine tag
+        id: compute
+        shell: bash
+        run: |
+          set -e
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            PYVER=$(python - <<'PY'
+import tomllib
+with open('pyproject.toml','rb') as f:
+    print(tomllib.load(f)['project']['version'])
+PY
+)
+            TAG="v${PYVER}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create tag if missing (dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -e
+          git fetch --tags
+          if git rev-parse -q --verify "refs/tags/${{ steps.compute.outputs.tag }}"; then
+            echo "Tag exists: ${{ steps.compute.outputs.tag }}"
+          else
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git tag ${{ steps.compute.outputs.tag }}
+            git push origin ${{ steps.compute.outputs.tag }}
+          fi
 
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -51,8 +104,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.compute.outputs.tag }}
           files: |
             dist/Imgdiff.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
