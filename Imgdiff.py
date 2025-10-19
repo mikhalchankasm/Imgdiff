@@ -55,6 +55,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger("imgdiff.gui")
 
 MAX_PREVIEW_SIZE = 1200
 
@@ -980,7 +981,7 @@ class SliderReveal(QWidget):
             return overlay
             
         except Exception as e:
-            print(f"Ошибка генерации overlay: {e}")
+            logger.error(f"Ошибка генерации overlay: {e}")
             return None
 
     def paintEvent(self, event):
@@ -1073,9 +1074,9 @@ class SliderReveal(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        print('init start')
+        logger.debug('init start')
         super().__init__()
-        print('step 1')
+        logger.debug('step 1')
         self.setWindowTitle("Image Diff UI – Outline")
         self.resize(1400, 800)
         self.settings = QSettings("imgdiff", "imgdiff_gui")
@@ -1087,7 +1088,7 @@ class MainWindow(QMainWindow):
         self.alignment_manager = None  # Будет инициализирован при выборе папки вывода
         self.alignment_control_panel = None  # Будет создан при инициализации UI
         
-        print('step 2')
+        logger.debug('step 2')
         # Пул потоков для параллельной обработки
         self.threadpool = QThreadPool.globalInstance()
         try:
@@ -1133,7 +1134,7 @@ class MainWindow(QMainWindow):
                 padding: 0 5px 0 5px;
             }
         """)
-        print('step 3')
+        logger.debug('step 3')
         self.compare_btn = QPushButton("⚡ Сравнить")
         self.compare_btn.setStyleSheet("""
             QPushButton {
@@ -1157,7 +1158,7 @@ class MainWindow(QMainWindow):
         self.result_table.verticalHeader().setVisible(False)
         self.result_table.setColumnHidden(2, True)
         self.result_table.itemDoubleClicked.connect(self.open_result)
-        print('step 4')
+        logger.debug('step 4')
         self.out_dir_label = QLabel("📤 Папка вывода:")
         self.out_dir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.out_dir_label.setStyleSheet("""
@@ -1205,7 +1206,7 @@ class MainWindow(QMainWindow):
         out_dir_row = QHBoxLayout()
         out_dir_row.addWidget(self.out_dir_btn)
         out_dir_row.addWidget(self.out_dir_refresh_btn)
-        print('step 5')
+        logger.debug('step 5')
         result_col = QVBoxLayout()
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
@@ -1240,7 +1241,7 @@ class MainWindow(QMainWindow):
         result_col_w.setLayout(result_col)
         result_col_w.setMinimumWidth(120)
         result_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        print('step 6')
+        logger.debug('step 6')
         # --- Вкладка 1: ⚙️ Настройки сравнения ---
         self.fuzz_spin = QSpinBox()
         self.fuzz_spin.setRange(0, 100)
@@ -1290,6 +1291,12 @@ class MainWindow(QMainWindow):
         self.ssim_chk.setChecked(False)
         self.ssim_chk.setToolTip("Использовать SSIM-индекс (лучше для текста, медленнее)")
         self.ssim_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        # Уровень логов в зависимости от Debug
+        try:
+            logger.setLevel(logging.DEBUG if self.debug_chk.isChecked() else logging.INFO)
+            self.debug_chk.stateChanged.connect(lambda _=None: logger.setLevel(logging.DEBUG if self.debug_chk.isChecked() else logging.INFO))
+        except Exception:
+            pass
         # --- Новый параметр для обнаружения близких линий ---
         self.match_tolerance_spin = QSpinBox()
         self.match_tolerance_spin.setRange(0, 20)
@@ -1475,7 +1482,7 @@ class MainWindow(QMainWindow):
 
         # --- Вкладка 2: 🔄 Сравнение/Слайдер ---
         # 📁 Левый столбец: грид A
-        print('left_col_w start')
+        logger.debug('left_col_w start')
         self.grp_a = FilteredTable("📁 Папка A", "A")
         self.grp_a_label = QLabel("📁 Папка A")
         self.grp_a_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1551,10 +1558,10 @@ class MainWindow(QMainWindow):
         left_col_w.setLayout(left_col)
         left_col_w.setMinimumWidth(120)
         left_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        print('left_col_w end')
-        print('step 7')
+        logger.debug('left_col_w end')
+        logger.debug('step 7')
         # 📁 Средний столбец: грид B
-        print('mid_col_w start')
+        logger.debug('mid_col_w start')
         self.grp_b = FilteredTable("📁 Папка B", "B")
         self.grp_b_label = QLabel("📁 Папка B")
         self.grp_b_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1630,8 +1637,8 @@ class MainWindow(QMainWindow):
         mid_col_w.setLayout(mid_col)
         mid_col_w.setMinimumWidth(120)
         mid_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        print('mid_col_w end')
-        print('step 8')
+        logger.debug('mid_col_w end')
+        logger.debug('step 8')
         # 📊 Правая колонка: результаты
         self.out_dir_label = QLabel("📤 Папка вывода:")
         self.out_dir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1791,8 +1798,8 @@ class MainWindow(QMainWindow):
         result_col_w.setLayout(result_col)
         result_col_w.setMinimumWidth(120)
         result_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        print('result_col_w end')
-        print('step 9')
+        logger.debug('result_col_w end')
+        logger.debug('step 9')
         
         # 🎛️ Кнопка скрытия/показа панели выбора папок
         self.toggle_folders_btn = QPushButton("👁️ Скрыть панели")
@@ -1817,24 +1824,24 @@ class MainWindow(QMainWindow):
         self.toggle_folders_shortcut = QShortcut(QKeySequence("Ctrl+H"), self)
         self.toggle_folders_shortcut.activated.connect(self.toggle_folders_panel)
         
-        print('before splitter')
+        logger.debug('before splitter')
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        print('after splitter')
+        logger.debug('after splitter')
         self.splitter.addWidget(left_col_w)
-        print('after add left')
+        logger.debug('after add left')
         self.splitter.addWidget(mid_col_w)
-        print('after add mid')
+        logger.debug('after add mid')
         self.splitter.addWidget(result_col_w)
-        print('after add result')
+        logger.debug('after add result')
         self.splitter.setSizes([180, 180, 180])
-        print('after setSizes')
+        logger.debug('after setSizes')
         self.splitter.setHandleWidth(4)
-        print('after setHandleWidth')
+        logger.debug('after setHandleWidth')
         # --- 🖼️ Слайдер справа ---
-        print('before slider_widget')
+        logger.debug('before slider_widget')
         self.slider_widget = QWidget()
         self.slider_layout = QVBoxLayout(self.slider_widget)
-        print('after slider_widget')
+        logger.debug('after slider_widget')
         # --- 🎛️ Панель управления над слайсером ---
         self.slider_control = QHBoxLayout()
         self.overlay_chk = QCheckBox("Overlay")
@@ -2019,25 +2026,25 @@ class MainWindow(QMainWindow):
         self.current_result_index = 0
         # Удаляем вызов self.update_slider_view_mode()
         # self.update_slider_view_mode()  # Удалить эту строку
-        print('after slider setup')
+        logger.debug('after slider setup')
         # --- 🎯 Главный QSplitter: три колонки + слайдер ---
-        print('before main_splitter')
+        logger.debug('before main_splitter')
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        print('after main_splitter')
+        logger.debug('after main_splitter')
         self.main_splitter.addWidget(self.splitter)
-        print('after add splitter')
+        logger.debug('after add splitter')
         self.main_splitter.addWidget(self.slider_widget)
-        print('after add slider_widget')
+        logger.debug('after add slider_widget')
         self.main_splitter.setSizes([540, 900])  # Увеличиваем зону превью в 1.5 раза
-        print('after main_splitter setSizes')
+        logger.debug('after main_splitter setSizes')
         self.main_splitter.setHandleWidth(4)
-        print('after main_splitter setHandleWidth')
+        logger.debug('after main_splitter setHandleWidth')
         # --- 📑 Tabs ---
-        print('before tabs')
+        logger.debug('before tabs')
         self.tabs = QTabWidget()
-        print('after tabs')
+        logger.debug('after tabs')
         self.tabs.addTab(settings_tab, "Настройки сравнения")
-        print('after add settings_tab')
+        logger.debug('after add settings_tab')
         main_tab = QWidget()
         main_layout = QVBoxLayout()
         
@@ -2057,22 +2064,22 @@ class MainWindow(QMainWindow):
         # Добавляем основной splitter
         main_layout.addWidget(self.main_splitter)
         main_tab.setLayout(main_layout)
-        print('after main_tab layout')
+        logger.debug('after main_tab layout')
         self.tabs.addTab(main_tab, "Сравнение и Слайдер")
-        print('after add main_tab')
+        logger.debug('after add main_tab')
         self.setCentralWidget(self.tabs)
-        print('after setCentralWidget')
+        logger.debug('after setCentralWidget')
         
         # --- 🎨 Устанавливаем иконку программы ---
         try:
             icon_path = "imgdiff_icon.ico"
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
-                print("✅ Иконка программы установлена")
+                logger.info("Иконка программы установлена")
             else:
-                print("⚠️ Файл иконки не найден: imgdiff_icon.ico")
+                logger.warning("Файл иконки не найден: imgdiff_icon.ico")
         except Exception as e:
-            print(f"⚠️ Не удалось установить иконку: {e}")
+            logger.warning(f"Не удалось установить иконку: {e}")
         
         # --- 🎨 Современный стиль ---
         self.setStyleSheet('''
@@ -2085,12 +2092,12 @@ class MainWindow(QMainWindow):
             QSplitter::handle { background: #b0b0b0; border: none; }
             QSplitter::handle:hover { background: #0078d7; }
         ''')
-        print('after setStyleSheet')
+        logger.debug('after setStyleSheet')
         # --- 📊 Status Bar ---
         self.progress_bar = QProgressBar()
         self.statusBar().addPermanentWidget(self.progress_bar)
         self.progress_bar.hide()
-        print('after status bar')
+        logger.debug('after status bar')
         # --- 🔗 Connections ---
         self.grp_a.dir_btn.clicked.connect(lambda: self.load_files(self.grp_a, 'A'))
         self.grp_b.dir_btn.clicked.connect(lambda: self.load_files(self.grp_b, 'B'))
@@ -2116,9 +2123,9 @@ class MainWindow(QMainWindow):
         self.exclude_a_table.itemSelectionChanged.connect(self.update_restore_buttons_state)
         self.exclude_b_table.itemSelectionChanged.connect(self.update_restore_buttons_state)
         
-        print('after connections')
+        logger.debug('after connections')
         self.restore_state()
-        print('init end')
+        logger.debug('init end')
         
         # Инициализируем состояние кнопки сохранения
         self.update_save_button_state()
@@ -2625,7 +2632,7 @@ class MainWindow(QMainWindow):
         
         # Если изображения слишком большие, предупреждаем пользователя
         if old_h > 8000 or old_w > 8000 or new_h > 8000 or new_w > 8000:
-            print(f"Предупреждение: Одно из изображений очень большое ({old_w}x{old_h} или {new_w}x{new_h}). Обработка может занять много времени.")
+            logger.warning(f"Одно из изображений очень большое ({old_w}x{old_h} или {new_w}x{new_h}). Обработка может занять много времени.")
         
         # --- Приводим оба изображения к максимальному размеру с улучшенным качеством ---
         h = max(old.shape[0], new.shape[0])
@@ -4736,6 +4743,11 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
+
+
+
 
 
 
