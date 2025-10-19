@@ -70,12 +70,8 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
           else
-            PYVER=$(python - <<'PY'
-            import tomllib
-            with open('pyproject.toml','rb') as f:
-                print(tomllib.load(f)['project']['version'])
-          PY
-            )
+            # Extract version from pyproject.toml using grep and sed
+            PYVER=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
             TAG="v${PYVER}"
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
