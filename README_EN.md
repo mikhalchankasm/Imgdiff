@@ -4,6 +4,8 @@
 
 Simple and fast image comparison with visual difference highlighting.
 
+![Imgdiff Demo](Imgdiff_demo.gif)
+
 - Windows GUI (PyQt5), OpenCV 4.x
 - Parallel batch processing
 - Overlay with customizable colors for A/B/matches
@@ -110,10 +112,8 @@ Program icon: `imgdiff_icon.ico` (available in repository). Use `create_icon.py`
 
 ## Features
 
-### Comparison Modes
-- **Overlay** — Semi-transparent colored regions on image
-- **Contours** — Outline boundaries of differences
-- **Heatmap** — Color-coded intensity visualization
+### Visualization
+- **Overlay** — Semi-transparent colored regions on image with customizable colors for additions/deletions/matches
 
 ### Processing
 - **Batch Processing** — Multiple image pairs in parallel
