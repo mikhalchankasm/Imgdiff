@@ -47,6 +47,7 @@ dev = [
     "ruff>=0.1.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
 ]
 all = [
     "imgdiff-compare[cli,ssim,dev]"
