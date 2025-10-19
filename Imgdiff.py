@@ -844,11 +844,13 @@ class SliderReveal(QWidget):
         self.pixmap_a = pixmap_a
         self.pixmap_b = pixmap_b
         self.slider_pos = 0.5
+        self.overlay_mode = False
         self.scale = 1.0
         self.offset = QPoint(0, 0)
         self._drag = False
         self._last_pos = QPoint(0, 0)
         self._drag_mode = False
+        self._sliding = False
         self.min_scale = 0.1
         self.max_scale = 10.0
         
@@ -868,7 +870,7 @@ class SliderReveal(QWidget):
         self.update()
 
     def setOverlayMode(self, enabled):
-        # Инвалидируем кэш при смене режима
+        self.overlay_mode = bool(enabled)
         self._overlay_cache = None
         self._overlay_cache_key = None
         self.update()
@@ -898,7 +900,12 @@ class SliderReveal(QWidget):
             color_a = main_window.color
             color_b = main_window.add_color
             color_match = main_window.match_color
-\n        # Режимы оверлея отключены: используем только заливку
+
+        # Ключ кэша для overlay
+        cache_key = (id(self.pixmap_a), id(self.pixmap_b),
+                     color_a.name(), color_b.name(), color_match.name())
+
+        # Режимы оверлея отключены: используем только заливку
             
         # Создаем ключ кэша на основе ID изображений и цветов
         if self._overlay_cache is not None and self._overlay_cache_key == cache_key:
@@ -948,45 +955,19 @@ class SliderReveal(QWidget):
             # ОПТИМИЗАЦИЯ: Векторизованные операции вместо циклов
             # Создаем маски не-белых пикселей за одну операцию
             # Используем numpy операции для ускорения
-                        # Формирование overlay в выбранном режиме
+            
+                        # Формируем overlay только в режиме заливки (Fill)
             color_a_rgb = [color_a.red(), color_a.green(), color_a.blue()]
             color_b_rgb = [color_b.red(), color_b.green(), color_b.blue()]
             color_match_rgb = [color_match.red(), color_match.green(), color_match.blue()]
             out = np.zeros((H, W, 4), dtype=np.uint8)
-            mode_l = str(mode_text).strip().lower()
-            if mode_l == 'contours':
-                gray_a = cv2.cvtColor(canvas_a, cv2.COLOR_RGBA2GRAY)
-                gray_b = cv2.cvtColor(canvas_b, cv2.COLOR_RGBA2GRAY)
-                ad = cv2.absdiff(gray_a, gray_b)
-                _, diff_bin = cv2.threshold(ad, 10, 255, cv2.THRESH_BINARY)
-                k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                edges = cv2.morphologyEx(diff_bin, cv2.MORPH_GRADIENT, k)
-                    edges = cv2.dilate(edges, k2)
-                mask_e = edges > 0
-                out[mask_e, :3] = color_match_rgb
-                out[mask_e, 3] = 200
-            elif mode_l == 'heatmap':
-                gray_a = cv2.cvtColor(canvas_a, cv2.COLOR_RGBA2GRAY)
-                gray_b = cv2.cvtColor(canvas_b, cv2.COLOR_RGBA2GRAY)
-                ad = cv2.absdiff(gray_a, gray_b)
-                cmap_code = getattr(cv2, f'COLORMAP_{cmap_name}', cv2.COLORMAP_JET)
-                try:
-                    cm = cv2.applyColorMap(ad, cmap_code)
-                except Exception:
-                    cm = cv2.applyColorMap(ad, cv2.COLORMAP_JET)
-                out[..., :3] = cm
-                alpha_val = int(max(0.0, min(1.0, heat_alpha)) * 255)
-                out[..., 3] = 0
-                nz = ad > 0
-                out[nz, 3] = alpha_val
-            else:
-                mask_a = np.any(canvas_a[:, :, :3] < 250, axis=2)
-                mask_b = np.any(canvas_b[:, :, :3] < 250, axis=2)
-                out[mask_a] = color_a_rgb + [120]
-                only_b = mask_b & ~mask_a
-                out[only_b] = color_b_rgb + [180]
-                both = mask_a & mask_b
-                out[both] = color_match_rgb + [200]
+            mask_a = np.any(canvas_a[:, :, :3] < 250, axis=2)
+            mask_b = np.any(canvas_b[:, :, :3] < 250, axis=2)
+            out[mask_a] = color_a_rgb + [120]
+            only_b = mask_b & ~mask_a
+            out[only_b] = color_b_rgb + [180]
+            both = mask_a & mask_b
+            out[both] = color_match_rgb + [200]
             overlay = QImage(out.tobytes(), out.shape[1], out.shape[0], out.strides[0], QImage.Format_RGBA8888)
             
             # Освобождаем numpy массив
@@ -1012,9 +993,9 @@ class SliderReveal(QWidget):
         # Применяем трансформации
         qp.translate(self.offset)
         qp.scale(self.scale, self.scale)
-        
-            # Обычный режим слайдера
+        if not self.overlay_mode:
             split_x = int(self.slider_pos * self.pixmap_a.width())
+            
             # Рисуем частями без копирования буферов
             qp.drawPixmap(QRect(0, 0, split_x, self.pixmap_a.height()), self.pixmap_a,
                           QRect(0, 0, split_x, self.pixmap_a.height()))
@@ -1046,15 +1027,20 @@ class SliderReveal(QWidget):
         self.update()
 
     def mousePressEvent(self, e):
-        # Средняя кнопка — drag, ЛКМ — слайдер
+        # Средняя кнопка — панорамирование, левая — перемещение слайдера
         if e.button() == Qt.MouseButton.MiddleButton:
             self._drag = True
             self._last_pos = e.pos()
             self._drag_mode = True
         elif e.button() == Qt.MouseButton.LeftButton:
-            self._drag_mode = False
-            self._drag = False
-            self._last_x = e.x()
+            self._sliding = True
+            try:
+                mouse_x = (e.x() - self.offset.x()) / max(self.scale, 1e-6)
+                if self.pixmap_a and self.pixmap_a.width() > 0:
+                    self.slider_pos = min(max(mouse_x / self.pixmap_a.width(), 0.0), 1.0)
+                    self.update()
+            except Exception:
+                pass
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
@@ -1063,17 +1049,22 @@ class SliderReveal(QWidget):
             self.offset += delta
             self._last_pos = e.pos()
             self.update()
-            # Преобразуем координаты мыши в координаты изображения с учетом зума и пана
-            mouse_x = (e.x() - self.offset.x()) / self.scale
-            if self.pixmap_a.width() > 0:
-                self.slider_pos = min(max(mouse_x / self.pixmap_a.width(), 0.0), 1.0)
-            self.update()
+        elif self._sliding:
+            try:
+                mouse_x = (e.x() - self.offset.x()) / max(self.scale, 1e-6)
+                if self.pixmap_a and self.pixmap_a.width() > 0:
+                    self.slider_pos = min(max(mouse_x / self.pixmap_a.width(), 0.0), 1.0)
+                    self.update()
+            except Exception:
+                pass
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MouseButton.MiddleButton:
             self._drag = False
             self._drag_mode = False
+        elif e.button() == Qt.MouseButton.LeftButton:
+            self._sliding = False
         super().mouseReleaseEvent(e)
 
     def resizeEvent(self, e):
@@ -1341,6 +1332,58 @@ class MainWindow(QMainWindow):
             }
         """)
         param_group.setLayout(param_form)
+
+        # --- Базовые настройки (видимые по умолчанию) ---
+        basic_group = QGroupBox("Базовые настройки")
+        basic_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                color: #424242;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        basic_form = QFormLayout()
+        # Цвета подсветки (используются и на экране, и при сохранении)
+        basic_form.addRow("Цвет A (удалено)", self.color_btn)
+        basic_form.addRow("Цвет B (добавлено)", self.add_color_btn)
+        basic_form.addRow("Цвет совпадений", self.match_color_btn)
+        # Сброс к заводским
+        self.reset_btn = QPushButton("Сбросить настройки")
+        self.reset_btn.setToolTip("Вернуть оптимальные значения по умолчанию")
+        self.reset_btn.clicked.connect(self.reset_settings_to_defaults)
+        basic_form.addRow("", self.reset_btn)
+        # Короткая памятка
+        basic_help = QLabel(
+            "<b>Как использовать:</b><br>"
+            "1) Выберите папки A и B, затем папку вывода.<br>"
+            "2) Включите Overlay (галочка над просмотрщиком),<br> &nbsp;&nbsp;подберите удобные цвета A/B/совпадений.<br>"
+            "3) Нажмите ‘Сравнить’. Файлы с отличиями сохраняются в вывод." )
+        basic_help.setWordWrap(True)
+        basic_form.addRow(basic_help)
+        basic_group.setLayout(basic_form)
+
+        # Кнопка сворачивания продвинутых настроек
+        self.advanced_toggle_btn = QPushButton("Показать продвинутые настройки")
+        self.advanced_toggle_btn.setCheckable(True)
+        self.advanced_toggle_btn.setChecked(False)
+        self.advanced_toggle_btn.setToolTip("Скрыть/показать технические параметры")
+        def _toggle_advanced(checked):
+            param_group.setVisible(checked)
+            param_help.setVisible(checked)
+            self.advanced_toggle_btn.setText(
+                "Скрыть продвинутые настройки" if checked else "Показать продвинутые настройки"
+            )
+        self.advanced_toggle_btn.toggled.connect(_toggle_advanced)
+        # По умолчанию прячем продвинутые
+        param_group.setVisible(False)
         # --- Performance controls (added after base params) ---
         self.fast_core_chk = QCheckBox("Fast ROI core")
         self.fast_core_chk.setChecked(True)
@@ -1422,6 +1465,8 @@ class MainWindow(QMainWindow):
         param_help.setWordWrap(True)
         param_help.setMaximumWidth(350)
         settings_layout = QVBoxLayout()
+        settings_layout.addWidget(basic_group, alignment=Qt.AlignmentFlag.AlignTop)
+        settings_layout.addWidget(self.advanced_toggle_btn, alignment=Qt.AlignmentFlag.AlignTop)
         settings_layout.addWidget(param_group, alignment=Qt.AlignmentFlag.AlignTop)
         settings_layout.addWidget(param_help, alignment=Qt.AlignmentFlag.AlignTop)
         settings_layout.addStretch(1)
@@ -1948,6 +1993,13 @@ class MainWindow(QMainWindow):
         self.slider_reveal = SliderReveal(QPixmap(), QPixmap(), parent=self)
         self.slider_layout.addWidget(self.slider_reveal, 1)
         self.slider_reveal.setVisible(True)
+        # Связь чекбокса Overlay с виджетом SliderReveal
+        try:
+            self.overlay_chk.stateChanged.connect(lambda _=None: self.slider_reveal.setOverlayMode(self.overlay_chk.isChecked()))
+            # установить начальное состояние
+            self.slider_reveal.setOverlayMode(self.overlay_chk.isChecked())
+        except Exception:
+            pass
         # overlay controls removed
         if self.output_dir:
             self.alignment_manager = ImageAlignmentManager(self.output_dir)
@@ -2665,6 +2717,56 @@ class MainWindow(QMainWindow):
     def update_slider_pair(self):
         # этот метод больше не нужен, но обновляем состояние кнопок
         self.update_save_button_state()
+    def reset_settings_to_defaults(self):
+        try:
+            # Базовые цвета
+            self.color = QColor("#FF0000")
+            self.add_color = QColor("#0066FF")
+            self.match_color = QColor("#0000FF")
+            self.color_btn.setText(f"Цвет: {self.color.name()}")
+            self.color_btn.setStyleSheet(f"background:{self.color.name()}")
+            self.add_color_btn.setText(f"Цвет добавленного: {self.add_color.name()}")
+            self.add_color_btn.setStyleSheet(f"background:{self.add_color.name()}")
+            self.match_color_btn.setText(f"Цвет совпадений: {self.match_color.name()}")
+            self.match_color_btn.setStyleSheet(f"background:{self.match_color.name()}; color:white")
+
+            # Продвинутые — оптимальные значения
+            self.fuzz_spin.setValue(3)
+            self.thick_spin.setValue(3)
+            self.noise_chk.setChecked(True)
+            self.min_area_spin.setValue(20)
+            self.gamma_spin.setValue(1.0)
+            self.match_tolerance_spin.setValue(0)
+            if hasattr(self, 'fast_core_chk'):
+                self.fast_core_chk.setChecked(True)
+            if hasattr(self, 'save_only_diffs_chk'):
+                self.save_only_diffs_chk.setChecked(True)
+            if hasattr(self, 'png_compression_spin'):
+                self.png_compression_spin.setValue(1)
+            if hasattr(self, 'auto_png_chk'):
+                self.auto_png_chk.setChecked(True)
+            if hasattr(self, 'quick_ratio_spin'):
+                self.quick_ratio_spin.setValue(0.10)
+            if hasattr(self, 'quick_max_side_spin'):
+                self.quick_max_side_spin.setValue(256)
+            if hasattr(self, 'auto_align_chk'):
+                self.auto_align_chk.setChecked(False)
+            if hasattr(self, 'auto_align_max_spin'):
+                self.auto_align_max_spin.setValue(1.0)
+            if hasattr(self, 'workers_spin'):
+                try:
+                    import os as _os
+                    self.workers_spin.setValue(max(1, min((_os.cpu_count() or 4), 8)))
+                except Exception:
+                    self.workers_spin.setValue(4)
+            self.debug_chk.setChecked(False)
+            self.ssim_chk.setChecked(False)
+
+            # Обновить просмотр
+            self.slider_reveal.invalidate_overlay_cache()
+            self.update_save_button_state()
+        except Exception as e:
+            logging.error(f"Ошибка сброса настроек: {e}")
 
         self.slider_reveal.setOverlayMode(self.overlay_chk.isChecked())
         # Обновляем состояние кнопок сохранения и подсветки
@@ -3044,8 +3146,6 @@ class MainWindow(QMainWindow):
             auto_png = self.settings.value("auto_png")
             if auto_png is not None and hasattr(self, 'auto_png_chk'):
                 self.auto_png_chk.setChecked(auto_png == "true" or auto_png is True)
-                if idx >= 0:
-                if idx2 >= 0:
             auto_align = self.settings.value("auto_align")
             if auto_align is not None and hasattr(self, 'auto_align_chk'):
                 self.auto_align_chk.setChecked(auto_align == "true" or auto_align is True)
@@ -3224,9 +3324,6 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
                 temp_slider.setOverlayMode(True)
-                try:
-                except Exception:
-                    pass
                 
                 # Генерируем overlay в полном разрешении
                 overlay_qimage = temp_slider._generate_overlay_cache()
@@ -4639,6 +4736,21 @@ if __name__ == "__main__":
     w = MainWindow()
     w.show()
     sys.exit(app.exec_())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

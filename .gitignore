@@ -53,7 +53,6 @@ dmypy.json
 
 # Logs
 *.log
-diff.log
 imgdiff.log
 
 # OS
@@ -64,7 +63,6 @@ desktop.ini
 # Imgdiff specific
 .imgdiff_cache/
 *.spec
-tatus
 
 # Build artifacts
 build/
@@ -72,4 +70,6 @@ dist/
 *.exe
 
 # Временные файлы
-t; ast.parse(open('Imgdiff.py').read())*
+__slice.txt
+__snippet.txt
+local-dev/

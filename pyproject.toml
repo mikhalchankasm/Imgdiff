@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "imgdiff-compare"
-version = "2.0.0"
+version = "2.1.0"
 description = "Высокопроизводительный инструмент для визуального сравнения изображений"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -104,4 +104,5 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+
 
