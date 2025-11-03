@@ -1153,35 +1153,7 @@ class MainWindow(QMainWindow):
             }
         """)
         logger.debug('step 3')
-        self.compare_btn = QPushButton("⚡ Сравнить")
-        try:
-            self.compare_btn.setToolTip(
-                "<b>Запустить сравнение</b><br>"
-                "Сравнивает выбранные пары файлов из папок A и B.<br><br>"
-                "<b>Горячая клавиша:</b> Enter<br><br>"
-                "<b>Как использовать:</b><br>"
-                "• Выберите одинаковое число файлов в A и B<br>"
-                "• Или включите 'Сравнить все' для автоматического сопоставления<br>"
-                "• Результаты сохраняются в папку вывода<br><br>"
-                "<b>Пример:</b> Выбрано 5 файлов в A и 5 в B → создастся 5 результатов"
-            )
-        except Exception:
-            pass
-        self.compare_btn.setStyleSheet("""
-            QPushButton {
-                background: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #f57c00;
-            }
-        """)
-        self.compare_btn.clicked.connect(self.compare_parallel)
+        # REMOVED: compare_btn - button removed from UI
         self.result_table = QTableWidget(0, 3)
         self.result_table.setHorizontalHeaderLabels(["Имя", "Статус", ""])
         self.result_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1254,37 +1226,7 @@ class MainWindow(QMainWindow):
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
         # radio_box НЕ добавляем здесь - этот result_col_w будет удален! Добавляем во второй result_col (строка ~1821)
-        # Панель управления батчем
-        self.pause_btn = QPushButton("⏸ Pause")
-        try:
-            self.pause_btn.setToolTip(
-                "<b>Пауза/продолжить обработку</b><br>"
-                "Приостанавливает пакетное сравнение.<br>"
-                "Текущий файл завершит обработку, затем обработка остановится.<br>"
-                "Повторный клик продолжит с того же места."
-            )
-        except Exception:
-            pass
-        self.pause_btn.setEnabled(False)
-        self.pause_btn.clicked.connect(self.toggle_pause)
-        self.stop_btn = QPushButton("⏹ Stop")
-        try:
-            self.stop_btn.setToolTip(
-                "<b>Остановить обработку</b><br>"
-                "Прекращает пакетное сравнение.<br>"
-                "Текущая пара файлов завершит обработку,<br>"
-                "затем все последующие пары будут пропущены."
-            )
-        except Exception:
-            pass
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_batch)
-        ctl_row = QHBoxLayout()
-        ctl_row.addWidget(self.compare_btn)
-        ctl_row.addWidget(self.pause_btn)
-        ctl_row.addWidget(self.stop_btn)
-        # Строку клавиш показываем также в верхней панели; здесь можно не добавлять
-        # result_col.addLayout(ctl_row)
+        # REMOVED: pause_btn, stop_btn, compare_btn - buttons removed from UI
         results_label = QLabel("📊 Результаты:")
         results_label.setStyleSheet("""
             QLabel {
@@ -2088,13 +2030,7 @@ class MainWindow(QMainWindow):
         # Добавляем кнопку скрытия/показа панелей в верхнюю часть
         top_controls = QHBoxLayout()
         top_controls.addWidget(self.toggle_folders_btn)
-        # Дублировать основные кнопки управления батчем в верхней панели для видимости
-        try:
-            top_controls.addWidget(self.compare_btn)
-            top_controls.addWidget(self.pause_btn)
-            top_controls.addWidget(self.stop_btn)
-        except Exception:
-            pass
+        # REMOVED: compare_btn, pause_btn, stop_btn - buttons removed from UI
         top_controls.addStretch(1)
         main_layout.addLayout(top_controls)
         
@@ -2629,18 +2565,14 @@ class MainWindow(QMainWindow):
     def toggle_pause(self):
         try:
             self.paused = not getattr(self, 'paused', False)
-            if hasattr(self, 'pause_btn'):
-                self.pause_btn.setText("Resume" if self.paused else "Pause")
+            # REMOVED: pause_btn UI update - button no longer exists
         except Exception:
             pass
 
     def stop_batch(self):
         try:
             self.cancel_requested = True
-            if hasattr(self, 'pause_btn'):
-                self.pause_btn.setEnabled(False)
-            if hasattr(self, 'stop_btn'):
-                self.stop_btn.setEnabled(False)
+            # REMOVED: pause_btn, stop_btn UI updates - buttons no longer exist
         except Exception:
             pass
 
@@ -2666,11 +2598,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximum(self.batch_total)
         self.progress_bar.setValue(0)
         self.progress_bar.show()
-        self.compare_btn.setEnabled(False)
-        # Управление батчем
-        self.pause_btn.setEnabled(True)
-        self.pause_btn.setText("Pause")
-        self.stop_btn.setEnabled(True)
+        # REMOVED: compare_btn, pause_btn, stop_btn UI updates - buttons no longer exist
 
         exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
         all_result_files = [
@@ -2833,7 +2761,7 @@ class MainWindow(QMainWindow):
                 f"Результаты: {self.output_dir}"
             )
             QMessageBox.information(self, "Сравнение завершено", message)
-            self.compare_btn.setEnabled(True)
+            # REMOVED: compare_btn.setEnabled - button no longer exists
             self.update_save_button_state()
 
     def _ensure_result_row(self, name: str, path: str) -> int:
