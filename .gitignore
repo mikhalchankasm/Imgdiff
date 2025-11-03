@@ -81,3 +81,27 @@ t; ast.parse(open('Imgdiff.py').read())*
 # Локальная разработка
 local-dev/
 
+# Отладочные/диагностические скрипты
+DEBUG_RUN.bat
+FIX_OPENCV.bat
+RUN_DIAGNOSTICS.bat
+SIMPLE_RUN.bat
+START_IMGDIFF_DEBUG.bat
+TIMEOUT_TEST.bat
+launcher.pyw
+run_debug.bat
+debug_*.py
+test_*.py
+diagnose*.py
+trace_*.py
+timeout_*.py
+simple_*.py
+quick_*.py
+force_*.py
+launch_*.py
+find_*.py
+line_*.py
+verbose_*.py
+*_error.txt
+*_output.txt
+
