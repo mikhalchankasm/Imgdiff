@@ -197,7 +197,6 @@ class CompareWorker(QRunnable):
                 self.params.get('use_fast_core', True),
                 self.params.get('save_only_diffs', True),
                 self.params.get('png_compression', 1),
-                self.params.get('quick_ratio_threshold', 0.001),
                 self.params.get('quick_max_side', 256),
                 self.params.get('auto_png', False),
                 self.params.get('auto_align', False),
@@ -214,7 +213,6 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
                      debug, use_ssim, output_dir, use_fast_core: bool = True,
                      save_only_diffs: bool = True,
                      png_compression: int = 1,
-                     quick_ratio_threshold: float = 0.001,
                      quick_max_side: int = 256,
                      auto_png: bool = False,
                      auto_align: bool = False,
@@ -236,27 +234,9 @@ def run_outline_core(left, right, out_path, fuzz, thick, del_color_bgr, add_colo
     if new.shape[:2] != (h, w):
         new = cv2.resize(new, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
-        # Быстрый pre-check отличий + опциональное авто-выравнивание (малые сдвиги)
-    try:
-        ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=quick_absdiff_thr)
-        if auto_align and (ratio >= quick_ratio_threshold) and (ratio <= (auto_align_max_percent / 100.0)):
-            try:
-                old_gray = cv2.cvtColor(old, cv2.COLOR_BGR2GRAY)
-                new_gray = cv2.cvtColor(new, cv2.COLOR_BGR2GRAY)
-                old_f = old_gray.astype(np.float32) / 255.0
-                new_f = new_gray.astype(np.float32) / 255.0
-                warp = np.eye(2, 3, dtype=np.float32)
-                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-4)
-                cv2.findTransformECC(old_f, new_f, warp, cv2.MOTION_TRANSLATION, criteria)
-                new = cv2.warpAffine(new, warp, (new.shape[1], new.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(255,255,255))
-                ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=quick_absdiff_thr)
-            except Exception:
-                pass
-        if ratio < quick_ratio_threshold:
-            del old, new
-            return 0
-    except Exception:
-        pass
+    # REMOVED: Quick pre-check optimization that was causing false negatives
+    # Now all comparisons go through the full comparison algorithm
+    # This ensures files with real differences are properly detected
 
     if use_fast_core and FAST_CORE_AVAILABLE:
         # Coarse-to-fine mask с локальным уточнением
@@ -1502,13 +1482,7 @@ class MainWindow(QMainWindow):
         self.auto_png_chk.setChecked(True)
         self.auto_png_chk.setToolTip("Автовыбор уровня сжатия по площади отличий (быстрее при больших различиях)")
         self.auto_png_chk.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.quick_ratio_spin = QDoubleSpinBox()
-        self.quick_ratio_spin.setRange(0.0, 100.0)
-        self.quick_ratio_spin.setSingleStep(0.05)
-        self.quick_ratio_spin.setValue(0.10)
-        self.quick_ratio_spin.setSuffix(" %")
-        self.quick_ratio_spin.setToolTip("Порог раннего выхода (отличий на даунскейле, %)")
-        self.quick_ratio_spin.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        # REMOVED: quick_ratio_spin control - quick pre-check optimization was removed
         self.quick_max_side_spin = QSpinBox()
         self.quick_max_side_spin.setRange(64, 2048)
         self.quick_max_side_spin.setValue(256)
@@ -1540,7 +1514,7 @@ class MainWindow(QMainWindow):
         param_form.addRow("Save only diffs", self.save_only_diffs_chk)
         param_form.addRow("PNG compression", self.png_compression_spin)
         param_form.addRow("Auto PNG compression", self.auto_png_chk)
-        param_form.addRow("Quick pre-check (%)", self.quick_ratio_spin)
+        # REMOVED: Quick pre-check (%) row - feature was removed
         param_form.addRow("Quick max side", self.quick_max_side_spin)
         param_form.addRow("Auto-align", self.auto_align_chk)
         param_form.addRow("Auto-align up to (%)", self.auto_align_max_spin)
@@ -2730,7 +2704,7 @@ class MainWindow(QMainWindow):
         save_only_diffs = True if not hasattr(self, 'save_only_diffs_chk') else self.save_only_diffs_chk.isChecked()
         png_compression = 1 if not hasattr(self, 'png_compression_spin') else int(self.png_compression_spin.value())
         auto_png = True if not hasattr(self, 'auto_png_chk') else self.auto_png_chk.isChecked()
-        quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
+        # REMOVED: quick_ratio_threshold - quick pre-check feature was removed
         quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
         auto_align = False if not hasattr(self, 'auto_align_chk') else self.auto_align_chk.isChecked()
         auto_align_max_percent = 1.0 if not hasattr(self, 'auto_align_max_spin') else float(self.auto_align_max_spin.value())
@@ -2805,7 +2779,6 @@ class MainWindow(QMainWindow):
                 'save_only_diffs': save_only_diffs,
                 'png_compression': png_compression,
                 'auto_png': auto_png,
-                'quick_ratio_threshold': quick_ratio_threshold,
                 'quick_max_side': quick_max_side,
                 'auto_align': auto_align,
                 'auto_align_max_percent': auto_align_max_percent,
@@ -2914,18 +2887,9 @@ class MainWindow(QMainWindow):
         debug = self.debug_chk.isChecked()
         use_ssim = self.ssim_chk.isChecked()
         debug_dir = Path(self.output_dir) / 'debug' if debug else Path('.')
-        
-        # Быстрый предфильтр: на даунскейле проверяем отличия
-        try:
-            quick_ratio_threshold = 0.001 if not hasattr(self, 'quick_ratio_spin') else float(self.quick_ratio_spin.value()) / 100.0
-            quick_max_side = 256 if not hasattr(self, 'quick_max_side_spin') else int(self.quick_max_side_spin.value())
-            ratio = quick_diff_ratio(old, new, max_side=quick_max_side, thr=5)
-            if ratio < quick_ratio_threshold:
-                # Почти равны — рано выходим без тяжелого diff
-                del old, new
-                return 0
-        except Exception:
-            pass
+
+        # REMOVED: Quick pre-check filter that was causing false negatives
+        # All images now go through full comparison to ensure real differences are detected
 
         overlay, meta = diff_two_color(
             old_img=old,
@@ -3009,8 +2973,7 @@ class MainWindow(QMainWindow):
                 self.png_compression_spin.setValue(1)
             if hasattr(self, 'auto_png_chk'):
                 self.auto_png_chk.setChecked(True)
-            if hasattr(self, 'quick_ratio_spin'):
-                self.quick_ratio_spin.setValue(0.10)
+            # REMOVED: quick_ratio_spin reset - control no longer exists
             if hasattr(self, 'quick_max_side_spin'):
                 self.quick_max_side_spin.setValue(256)
             if hasattr(self, 'auto_align_chk'):
@@ -3325,7 +3288,7 @@ class MainWindow(QMainWindow):
                 self.settings.setValue("auto_align", self.auto_align_chk.isChecked())
             if hasattr(self, 'auto_align_max_spin'):
                 self.settings.setValue("auto_align_max_percent", float(self.auto_align_max_spin.value()))
-            self.settings.setValue("quick_ratio_percent", float(self.quick_ratio_spin.value()))
+            # REMOVED: quick_ratio_percent setting - control no longer exists
             self.settings.setValue("quick_max_side", int(self.quick_max_side_spin.value()))
             self.settings.setValue("workers", int(self.workers_spin.value()))
         except Exception:
@@ -3416,9 +3379,7 @@ class MainWindow(QMainWindow):
             auto_align_max_percent = self.settings.value("auto_align_max_percent")
             if auto_align_max_percent and hasattr(self, 'auto_align_max_spin'):
                 self.auto_align_max_spin.setValue(float(auto_align_max_percent))
-            quick_ratio_percent = self.settings.value("quick_ratio_percent")
-            if quick_ratio_percent and hasattr(self, 'quick_ratio_spin'):
-                self.quick_ratio_spin.setValue(float(quick_ratio_percent))
+            # REMOVED: quick_ratio_percent loading - control no longer exists
             quick_max_side = self.settings.value("quick_max_side")
             if quick_max_side and hasattr(self, 'quick_max_side_spin'):
                 self.quick_max_side_spin.setValue(int(quick_max_side))
