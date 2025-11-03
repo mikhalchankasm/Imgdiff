@@ -36,6 +36,10 @@ env/
 # PyCharm
 .idea/
 
+# Cursor/Claude IDE settings (may contain local paths)
+.cursor/
+.claude/
+
 # Pytest
 .pytest_cache/
 .coverage
@@ -72,11 +76,8 @@ dist/
 # Временные файлы
 __slice.txt
 __snippet.txt
-local-dev/
-
-# Ignore accidental stray files
-__slice.txt
-__snippet.txt
 t; ast.parse(open('Imgdiff.py').read())*
+
+# Локальная разработка
 local-dev/
 

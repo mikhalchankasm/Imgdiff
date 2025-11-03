@@ -10,9 +10,11 @@ try:
     cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
 except Exception:
     try:
-        import cv2.utils.logging as cvlog  # pylint: disable=import-error
-        cvlog.setLogLevel(cvlog.LOG_LEVEL_ERROR)
-    except Exception:
+        # OpenCV 4.8+ использует отдельный модуль логирования
+        import cv2.utils.logging as cvlog  # type: ignore[import,no-untyped-def]
+        cvlog.setLogLevel(cvlog.LOG_LEVEL_ERROR)  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
+        # Fallback для старых версий OpenCV
         pass
 import numpy as np
 import re
