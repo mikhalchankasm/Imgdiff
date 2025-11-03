@@ -1273,7 +1273,7 @@ class MainWindow(QMainWindow):
         result_col = QVBoxLayout()
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
-        result_col.addWidget(radio_box)
+        # radio_box НЕ добавляем здесь - этот result_col_w будет удален! Добавляем во второй result_col (строка ~1821)
         # Панель управления батчем
         self.pause_btn = QPushButton("⏸ Pause")
         try:
@@ -1807,7 +1807,7 @@ class MainWindow(QMainWindow):
         result_col = QVBoxLayout()
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
-        result_col.addWidget(radio_box)  # Используем radio_box созданный ранее (строки 1135-1170)
+        result_col.addWidget(radio_box)  # Добавляем radio_box в ЭТОТ layout (второй, который используется)
         result_col.addWidget(self.save_overlay_btn)  # Кнопка под радио-кнопками
         results_label = QLabel("📊 Результаты:")
         results_label.setStyleSheet("""
@@ -1888,7 +1888,7 @@ class MainWindow(QMainWindow):
         self.toggle_folders_shortcut.activated.connect(self.toggle_folders_panel)
         
         logger.debug('before splitter')
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Horizontal)
         logger.debug('after splitter')
         self.splitter.addWidget(left_col_w)
         logger.debug('after add left')
@@ -2092,7 +2092,7 @@ class MainWindow(QMainWindow):
         logger.debug('after slider setup')
         # --- 🎯 Главный QSplitter: три колонки + слайдер ---
         logger.debug('before main_splitter')
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter = QSplitter(Qt.Horizontal)
         logger.debug('after main_splitter')
         self.main_splitter.addWidget(self.splitter)
         logger.debug('after add splitter')
