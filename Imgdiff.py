@@ -6,6 +6,10 @@ import sys
 import shutil
 import logging
 import cv2
+
+# Подавляем DeprecationWarning от PyQt5 (sipPyTypeDict)
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*sipPyTypeDict.*")
+
 try:
     cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
 except Exception:
