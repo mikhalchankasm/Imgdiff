@@ -1172,8 +1172,14 @@ class MainWindow(QMainWindow):
         self.compare_btn = QPushButton("⚡ Сравнить")
         try:
             self.compare_btn.setToolTip(
-                "Запустить сравнение выбранных пар (Enter).\n"
-                "Пример: выделите одинаковое число файлов в A и B — будут созданы результаты в папке вывода."
+                "<b>Запустить сравнение</b><br>"
+                "Сравнивает выбранные пары файлов из папок A и B.<br><br>"
+                "<b>Горячая клавиша:</b> Enter<br><br>"
+                "<b>Как использовать:</b><br>"
+                "• Выберите одинаковое число файлов в A и B<br>"
+                "• Или включите 'Сравнить все' для автоматического сопоставления<br>"
+                "• Результаты сохраняются в папку вывода<br><br>"
+                "<b>Пример:</b> Выбрано 5 файлов в A и 5 в B → создастся 5 результатов"
             )
         except Exception:
             pass
@@ -1216,8 +1222,13 @@ class MainWindow(QMainWindow):
         self.out_dir_btn = QPushButton("📁 Выбрать папку вывода…")
         try:
             self.out_dir_btn.setToolTip(
-                "Папка, куда сохраняются diff/overlay/mask.\n"
-                "Пример: D:\\projects\\results"
+                "<b>Выбрать папку для результатов</b><br>"
+                "Все diff, overlay и mask файлы сохраняются в эту папку.<br><br>"
+                "<b>Формат имён файлов:</b> <code>имяA__vs__имяB_outline.png</code><br><br>"
+                "<b>Примеры путей:</b><br>"
+                "• D:\\projects\\results<br>"
+                "• C:\\Users\\Name\\Desktop\\diffs<br>"
+                "• .\\output (текущая папка)"
             )
         except Exception:
             pass
@@ -1260,16 +1271,26 @@ class MainWindow(QMainWindow):
         result_col.addLayout(out_dir_row)
         result_col.addWidget(radio_box)
         # Панель управления батчем
-        self.pause_btn = QPushButton("Pause")
+        self.pause_btn = QPushButton("⏸ Pause")
         try:
-            self.pause_btn.setToolTip("Пауза/продолжить пакетную обработку")
+            self.pause_btn.setToolTip(
+                "<b>Пауза/продолжить обработку</b><br>"
+                "Приостанавливает пакетное сравнение.<br>"
+                "Текущий файл завершит обработку, затем обработка остановится.<br>"
+                "Повторный клик продолжит с того же места."
+            )
         except Exception:
             pass
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self.toggle_pause)
-        self.stop_btn = QPushButton("Stop")
+        self.stop_btn = QPushButton("⏹ Stop")
         try:
-            self.stop_btn.setToolTip("Остановить пакет (текущая пара завершится)")
+            self.stop_btn.setToolTip(
+                "<b>Остановить обработку</b><br>"
+                "Прекращает пакетное сравнение.<br>"
+                "Текущая пара файлов завершит обработку,<br>"
+                "затем все последующие пары будут пропущены."
+            )
         except Exception:
             pass
         self.stop_btn.setEnabled(False)
@@ -1755,33 +1776,6 @@ class MainWindow(QMainWindow):
         out_dir_row = QHBoxLayout()
         out_dir_row.addWidget(self.out_dir_btn)
         out_dir_row.addWidget(self.out_dir_refresh_btn)
-        # --- 🔘 Радиокнопки сравнения в QGroupBox ---
-        self.radio_all = QRadioButton("Сравнить все")
-        self.radio_sel = QRadioButton("Сравнить только выделенные")
-        self.radio_sel.setChecked(True)
-        self.radio_group = QButtonGroup()
-        self.radio_group.addButton(self.radio_all)
-        self.radio_group.addButton(self.radio_sel)
-        radio_box = QGroupBox("⚙️ Режим сравнения")
-        radio_layout = QVBoxLayout()
-        radio_layout.addWidget(self.radio_all)
-        radio_layout.addWidget(self.radio_sel)
-        radio_box.setLayout(radio_layout)
-        radio_box.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                color: #424242;
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-        """)
         
         # 💾 Кнопка сохранения overlay - перемещена под радио-кнопки
         self.save_overlay_btn = QPushButton("💾 Сохранить overlay")
@@ -1806,12 +1800,10 @@ class MainWindow(QMainWindow):
         self.save_overlay_btn.clicked.connect(self.save_overlay)
         self.save_overlay_btn.setEnabled(False)  # Включаем только когда overlay активен
         
-
-        
         result_col = QVBoxLayout()
         result_col.addWidget(self.out_dir_label)
         result_col.addLayout(out_dir_row)
-        result_col.addWidget(radio_box)
+        result_col.addWidget(radio_box)  # Используем radio_box созданный ранее (строки 1135-1170)
         result_col.addWidget(self.save_overlay_btn)  # Кнопка под радио-кнопками
         results_label = QLabel("📊 Результаты:")
         results_label.setStyleSheet("""
@@ -2148,16 +2140,210 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.warning(f"Не удалось установить иконку: {e}")
         
-        # --- 🎨 Современный стиль ---
+        # --- 🎨 Современный стиль с улучшенной цветовой схемой ---
         self.setStyleSheet('''
-            QWidget { background: #f7f7fa; }
-            QTableWidget { background: #fff; border: 1px solid #bbb; border-radius: 6px; font-size: 13px; }
-            QHeaderView::section { background: #eaeaea; font-weight: bold; border: none; border-bottom: 1px solid #bbb; }
-            QPushButton { background: #e0e6f6; border: 1px solid #aab; border-radius: 6px; padding: 4px 10px; font-size: 13px; }
-            QPushButton:hover { background: #d0d8f0; }
-            QLabel { font-size: 13px; }
-            QSplitter::handle { background: #b0b0b0; border: none; }
-            QSplitter::handle:hover { background: #0078d7; }
+            /* Основной фон */
+            QWidget { 
+                background: #fafbfc; 
+                color: #24292e;
+                font-family: "Segoe UI", Arial, sans-serif;
+            }
+            
+            /* Таблицы */
+            QTableWidget { 
+                background: #ffffff; 
+                border: 1px solid #e1e4e8; 
+                border-radius: 8px; 
+                font-size: 13px;
+                gridline-color: #f1f3f5;
+                selection-background-color: #0366d6;
+                selection-color: #ffffff;
+            }
+            QTableWidget::item {
+                padding: 4px;
+                border-bottom: 1px solid #f6f8fa;
+            }
+            QTableWidget::item:hover {
+                background: #f6f8fa;
+            }
+            QTableWidget::item:selected {
+                background: #0366d6;
+                color: #ffffff;
+            }
+            
+            /* Заголовки таблиц */
+            QHeaderView::section { 
+                background: #f6f8fa; 
+                font-weight: 600; 
+                border: none; 
+                border-bottom: 2px solid #e1e4e8;
+                border-right: 1px solid #e1e4e8;
+                padding: 8px;
+                color: #586069;
+            }
+            
+            /* Кнопки по умолчанию */
+            QPushButton { 
+                background: #fafbfc; 
+                border: 1px solid #e1e4e8; 
+                border-radius: 6px; 
+                padding: 6px 12px; 
+                font-size: 13px;
+                font-weight: 500;
+                color: #24292e;
+                min-height: 28px;
+            }
+            QPushButton:hover { 
+                background: #f3f4f6; 
+                border-color: #d1d5da;
+            }
+            QPushButton:pressed {
+                background: #e4e7eb;
+                border-color: #c6cbd1;
+            }
+            QPushButton:disabled {
+                background: #f6f8fa;
+                color: #959da5;
+                border-color: #e1e4e8;
+            }
+            
+            /* Лейблы */
+            QLabel { 
+                font-size: 13px;
+                color: #24292e;
+            }
+            
+            /* Splitter */
+            QSplitter::handle { 
+                background: #e1e4e8; 
+                border: none;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover { 
+                background: #0366d6; 
+            }
+            
+            /* CheckBox */
+            QCheckBox {
+                spacing: 6px;
+                color: #24292e;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #d1d5da;
+                border-radius: 4px;
+                background: #ffffff;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #0366d6;
+            }
+            QCheckBox::indicator:checked {
+                background: #0366d6;
+                border-color: #0366d6;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiLz48L3N2Zz4=);
+            }
+            
+            /* RadioButton */
+            QRadioButton {
+                spacing: 6px;
+                color: #24292e;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #d1d5da;
+                border-radius: 9px;
+                background: #ffffff;
+            }
+            QRadioButton::indicator:hover {
+                border-color: #0366d6;
+            }
+            QRadioButton::indicator:checked {
+                border-color: #0366d6;
+                background: #0366d6;
+            }
+            
+            /* SpinBox, DoubleSpinBox */
+            QSpinBox, QDoubleSpinBox {
+                border: 1px solid #e1e4e8;
+                border-radius: 6px;
+                padding: 4px 8px;
+                background: #ffffff;
+                selection-background-color: #0366d6;
+                min-height: 28px;
+            }
+            QSpinBox:hover, QDoubleSpinBox:hover {
+                border-color: #d1d5da;
+            }
+            QSpinBox:focus, QDoubleSpinBox:focus {
+                border-color: #0366d6;
+                outline: none;
+            }
+            
+            /* ComboBox */
+            QComboBox {
+                border: 1px solid #e1e4e8;
+                border-radius: 6px;
+                padding: 4px 8px;
+                background: #ffffff;
+                min-height: 28px;
+            }
+            QComboBox:hover {
+                border-color: #d1d5da;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #586069;
+                width: 0;
+                height: 0;
+            }
+            
+            /* TabWidget */
+            QTabWidget::pane {
+                border: 1px solid #e1e4e8;
+                border-radius: 6px;
+                background: #ffffff;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #f6f8fa;
+                border: 1px solid #e1e4e8;
+                border-bottom: none;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                color: #586069;
+            }
+            QTabBar::tab:hover {
+                background: #ffffff;
+                color: #24292e;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #24292e;
+                border-bottom: 1px solid #ffffff;
+            }
+            
+            /* ProgressBar */
+            QProgressBar {
+                border: 1px solid #e1e4e8;
+                border-radius: 4px;
+                background: #f6f8fa;
+                text-align: center;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background: #0366d6;
+                border-radius: 3px;
+            }
         ''')
         logger.debug('after setStyleSheet')
         # --- 📊 Status Bar ---
