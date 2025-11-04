@@ -1847,30 +1847,9 @@ class MainWindow(QMainWindow):
             }
         """)
         self.fit_to_window_btn.clicked.connect(self.fit_to_window)
-        
-        # Кнопка "Подсветить различия"
-        self.highlight_diff_btn = QPushButton("💡 Подсветить различия")
-        self.highlight_diff_btn.setToolTip("Подсветить места различий мигающим кругом на 3 секунды")
-        self.highlight_diff_btn.setStyleSheet("""
-            QPushButton {
-                background: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #f57c00;
-            }
-            QPushButton:disabled {
-                background: #bdbdbd;
-                color: #757575;
-            }
-        """)
-        self.highlight_diff_btn.clicked.connect(self.highlight_differences)
-        self.highlight_diff_btn.setEnabled(False)  # Включаем только когда overlay активен
-        
+
+        # REMOVED: highlight_diff_btn - button removed due to instability
+
         # Кнопка отладки различий (УБРАНА)
         # self.debug_diff_btn = QPushButton("🐛 Debug различия")
         # self.debug_diff_btn.setToolTip("Показать отладочную информацию о различиях")
@@ -1929,7 +1908,7 @@ class MainWindow(QMainWindow):
         self.next_btn.clicked.connect(self.navigate_next)
         self.slider_control.addWidget(self.overlay_chk)
         self.slider_control.addWidget(self.fit_to_window_btn)
-        self.slider_control.addWidget(self.highlight_diff_btn)
+        # REMOVED: highlight_diff_btn - button removed
         # self.slider_control.addWidget(self.debug_diff_btn)  # УБРАНО
         self.slider_control.addStretch(1)
         self.slider_control.addWidget(self.prev_btn)
@@ -3564,7 +3543,7 @@ class MainWindow(QMainWindow):
         # Остальные проверки будут выполнены в save_overlay методе
         should_enable = overlay_checked
         self.save_overlay_btn.setEnabled(should_enable)
-        self.highlight_diff_btn.setEnabled(should_enable)
+        # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
     
     def highlight_differences(self):
         """Подсвечивает места различий мигающим кругом на 3 секунды (асинхронная версия)"""
@@ -3584,8 +3563,8 @@ class MainWindow(QMainWindow):
             img_b = self.slider_reveal.pixmap_b.toImage()
             
             self.statusBar().showMessage(f"Анализируем различия... Размеры: {img_a.width()}x{img_a.height()} vs {img_b.width()}x{img_b.height()}", 2000)
-            self.highlight_diff_btn.setEnabled(False)  # Блокируем кнопку во время обработки
-            
+            # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
+
             # Запускаем анализ различий в отдельном потоке через QTimer
             # Это предотвращает зависание UI
             QTimer.singleShot(10, self.create_difference_highlight_animation)
@@ -3594,7 +3573,7 @@ class MainWindow(QMainWindow):
             # Обработка ошибок для предотвращения зависания
             logging.error(f"Ошибка при запуске подсветки различий: {e}")
             self.statusBar().showMessage("Ошибка при запуске подсветки", 3000)
-            self.highlight_diff_btn.setEnabled(True)  # Разблокируем кнопку
+            # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
             # self.debug_diff_btn.setEnabled(True)  # Разблокируем кнопку отладки (УБРАНО)
     
     def create_difference_highlight_animation(self):
@@ -3657,9 +3636,9 @@ class MainWindow(QMainWindow):
             self.diff_percentage_label.setText("Ошибка подсветки")
             self.statusBar().showMessage(f"Ошибка подсветки: {str(e)}", 3000)
         finally:
-            # Разблокируем кнопку подсветки в любом случае
-            self.highlight_diff_btn.setEnabled(True)
+            # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
             # self.debug_diff_btn.setEnabled(True)  # УБРАНО
+            pass
     
     def find_differences_simple(self, img_a, img_b):
         """ПРОСТОЙ и стабильный поиск различий"""
@@ -4313,11 +4292,11 @@ class MainWindow(QMainWindow):
             else:
                 self.slider_reveal.setVisible(False)
                 self.save_overlay_btn.setEnabled(False)
-                self.highlight_diff_btn.setEnabled(False)
+                # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
         else:
             self.slider_reveal.setVisible(False)
             self.save_overlay_btn.setEnabled(False)
-            self.highlight_diff_btn.setEnabled(False)
+            # REMOVED: highlight_diff_btn.setEnabled - button no longer exists
 
 
     # --- 🚫 Методы для работы с исключениями ---
