@@ -55,7 +55,7 @@ try:
 except Exception:
     FAST_CORE_AVAILABLE = False
 from core.slider_reveal import SliderReveal
-# Временно отключена функциональность смещения изображенийcl
+# Временно отключена функциональность смещения изображений
 from core.image_alignment import ImageAlignmentManager
 from core.alignment_controls import AlignmentControlPanel
 
