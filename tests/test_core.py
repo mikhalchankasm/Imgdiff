@@ -154,6 +154,13 @@ def test_create_heatmap(test_images):
 
 
 # Бенчмарки (требуют pytest-benchmark)
+try:
+    import pytest_benchmark
+    HAS_BENCHMARK = True
+except ImportError:
+    HAS_BENCHMARK = False
+
+@pytest.mark.skipif(not HAS_BENCHMARK, reason="pytest-benchmark not installed")
 @pytest.mark.benchmark
 def test_benchmark_diff_mask_fast_lab(benchmark, test_images):
     """Бенчмарк быстрой маски с Lab"""
@@ -162,6 +169,7 @@ def test_benchmark_diff_mask_fast_lab(benchmark, test_images):
     assert result is not None
 
 
+@pytest.mark.skipif(not HAS_BENCHMARK, reason="pytest-benchmark not installed")
 @pytest.mark.benchmark
 def test_benchmark_diff_mask_fast_bgr(benchmark, test_images):
     """Бенчмарк быстрой маски с BGR"""
@@ -170,6 +178,7 @@ def test_benchmark_diff_mask_fast_bgr(benchmark, test_images):
     assert result is not None
 
 
+@pytest.mark.skipif(not HAS_BENCHMARK, reason="pytest-benchmark not installed")
 @pytest.mark.benchmark
 def test_benchmark_coarse_to_fine(benchmark, test_images):
     """Бенчмарк многомасштабного сравнения"""

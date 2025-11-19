@@ -91,7 +91,7 @@ TIMEOUT_TEST.bat
 launcher.pyw
 run_debug.bat
 debug_*.py
-test_*.py
+
 diagnose*.py
 trace_*.py
 timeout_*.py
